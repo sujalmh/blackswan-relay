@@ -1,0 +1,19 @@
+{
+  "name": "blackswan-scripts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Sepolia deploy + private-mempool compile-prove-settle + honest-vs-cheat demo for BlackSwan Relay",
+  "scripts": {
+    "deploy": "forge script contracts/script/Deploy.s.sol:Deploy --rpc-url $SEPOLIA_RPC_URL --broadcast --verify --etherscan-api-key $ETHERSCAN_API_KEY -vvvv",
+    "compileProveSettle:honest": "tsx scripts/compileProveSettle.ts --round 1 --target 600 --mode honest",
+    "compileProveSettle:cheat-underfunded": "tsx scripts/compileProveSettle.ts --round 2 --target 600 --mode cheat-underfunded",
+    "compileProveSettle:cheat-nullifier": "tsx scripts/compileProveSettle.ts --round 3 --target 600 --mode cheat-nullifier",
+    "demo": "tsx scripts/demo.ts"
+  },
+  "dependencies": {
+    "viem": "2.37.13",
+    "tsx": "4.19.1",
+    "typescript": "5.8.3"
+  }
+}

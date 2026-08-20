@@ -1,0 +1,37 @@
+{
+  "name": "blackswan-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "BlackSwan Relay — recapitalize without the signal. Next.js + shadcn, private-mempool demo.",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "15.4.6",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "viem": "2.37.13",
+    "ethers": "6.15.0",
+    "@noir-lang/noir_js": "1.0.0-beta.26",
+    "clsx": "2.1.1",
+    "tailwind-merge": "3.3.1",
+    "lucide-react": "0.540.0",
+    "class-variance-authority": "0.7.1",
+    "tailwindcss-animate": "1.0.7"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3",
+    "@types/node": "20.19.1",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.4",
+    "tailwindcss": "3.4.17",
+    "postcss": "8.5.6",
+    "autoprefixer": "10.4.21",
+    "eslint": "9.23.0",
+    "eslint-config-next": "15.4.6"
+  }
+}

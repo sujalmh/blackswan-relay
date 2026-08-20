@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --primary: 243 75% 58.6%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 243 75% 58.6%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Subtle mesh gradient header - light, modern, not generic dark */
+.mesh-bg {
+  background:
+    radial-gradient(at 40% 20%, hsla(243,75%,58%,0.14) 0px, transparent 50%),
+    radial-gradient(at 80% 0%, hsla(188,94%,42%,0.12) 0px, transparent 50%),
+    radial-gradient(at 0% 50%, hsla(355,87%,66%,0.08) 0px, transparent 50%),
+    radial-gradient(at 80% 50%, hsla(340,75%,55%,0.06) 0px, transparent 50%),
+    linear-gradient(to bottom, #ffffff, #fafafb);
+}
+
+.glass-card {
+  @apply bg-white/70 backdrop-blur-xl border border-zinc-200/60 shadow-[0_8px_30px_rgba(0,0,0,0.06)] ;
+}
+
+.shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

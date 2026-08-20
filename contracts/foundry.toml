@@ -1,0 +1,19 @@
+[profile.default]
+src = "src"
+out = "out"
+cache_path = "cache"
+libs = ["lib"]
+# Pinned solc per AGENTS.md:29-33 — Noir verifier needs 0.8.20+ (cancun). Pin exact.
+# Updated to 0.8.27 for Barretenberg 5.0.0-nightly UltraHonk verifier (pragma ^0.8.27 in generated RecapVerifier.sol:132)
+solc_version = "0.8.27"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+ffi = true
+fs_permissions = [{ access = "read-write", path = "./" }, { access = "read-write", path = "../scripts/deployments" }, { access = "read", path = "../circuits/rescue_circuit/target" }, { access = "read", path = "../circuits/rescue_circuit/target/proof" }]
+# No floating remappings — add only when libs present
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = true

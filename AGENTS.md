@@ -8,6 +8,8 @@ This file is the single source of truth for anyone (human or autonomous agent) c
 
 Build a working, **non-simulated Sepolia demo** of the private emergency recapitalization primitive for the **Road to Devcon — NITK Surathkal** hackathon, **Private DeFi & Mempools** track, aiming for **Overall**.
 
+**Pitch framing (do not change product):** `BlackSwan Relay — recapitalize without the signal. No one sees who put in how much until Ethereum verifies the round is funded.` The rescue commitment is the DeFi flow — a private yield provision (discounted `RescueShare` premium) whose size is hidden from public mempool/MEV signal until aggregate `sum >= T` proves. Track keywords (`yield strategy`, `MEV`, `mempool`) are proved in execution (private-RPC commitments, explorer shows only `RescueTargetMet` + hashes), not in hero title. Keep the honest claim: amounts hidden, set-anonymity not claimed.
+
 ---
 
 ## Non-negotiable scope (HARD LIMITS)
@@ -16,10 +18,11 @@ These are deliberate constraints from the implementation analysis. Exceeding the
 
 1. **One Noir circuit**: prove `sum(c_i) >= T` over Pedersen-style commitments, bounded to a single round by a per-rescuer nullifier. No secondary circuits.
 2. **One distressed vault + one orchestration contract + one generated verifier.** No multi-vault, no general-purpose framework.
-3. **Three rescuers, fixed denominations, one ERC-20, one round** in the MVP demo flow.
-4. **Non-simulated testnet flow on Sepolia.** The honest path, the public-comparison path, and the invalid-round rejection must all be real contract execution with real proofs — no mocked state.
-5. **Honest privacy claim only:** individual contribution amounts hidden; aggregate capacity proven. **Do NOT claim participant-set anonymity** (not in scope, not buildable this weekend).
+3. **Three rescuers, fixed denominations, one ERC-20, one round** in the MVP demo flow. Example: `T=600` with denoms `100/200/500` — strategy size is the hidden field.
+4. **Non-simulated testnet flow on Sepolia.** The honest path, the public-comparison path (public mempool leaks amounts), and the invalid-round rejection must all be real contract execution with real proofs — no mocked state. BlackSwan commitments must be submitted via private mempool (`eth_sendPrivateTransaction` / Flashbots Protect / MEV Blocker) so amounts never appear in public mempool.
+5. **Honest privacy claim only:** individual contribution amounts / strategy sizes hidden from public mempool/MEV bots/explorer/analytics; aggregate capacity proven. **Do NOT claim participant-set anonymity** (not in scope, not buildable this weekend). Tagline `without the signal` refers to amount signal, not anonymity set.
 6. **Do NOT port the other researched ideas** (Solver Conclave, Position Vault, ThresholdAudit) into this repo. They are recorded alternatives only.
+7. **Do NOT re-derive product as swap-hider.** The rescue commitment is the DeFi flow (private yield provision, `RescueShare` premium). Track fit is shown by private-mempool execution, not by adding swaps.
 
 ---
 

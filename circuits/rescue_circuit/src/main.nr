@@ -9,7 +9,7 @@
 // address cannot double-count the same commitment twice. Individual amounts stay
 // private witnesses; only the aggregate bound and the commitment set are public.
 
-use std::hash::poseidon2;
+use std::hash::pedersen_hash;
 
 // Maximum number of rescuers the circuit can hold. Unused slots carry
 // amount = nullifier = secret = 0 and a commitment that provably encodes 0.
@@ -17,12 +17,12 @@ global MAX_RESCUERS: u32 = 6;
 
 // Bit-width used for the range/positivity checks on each amount. 64 bits keeps the
 // circuit small while covering a generous amount range (up to ~18.4 quintillion).
-global amount_bits = 64;
+global amount_bits: u32 = 64;
 
-pub fn main(
-    pub commitments: [Field; MAX_RESCUERS],
-    pub target: Field,
-    pub round_id: Field,
+fn main(
+    commitments: pub [Field; MAX_RESCUERS],
+    target: pub Field,
+    round_id: pub Field,
     amounts: [Field; MAX_RESCUERS],
     nullifiers: [Field; MAX_RESCUERS],
     secrets: [Field; MAX_RESCUERS],
@@ -30,22 +30,105 @@ pub fn main(
     // 1. Recompute and bind each commitment to its private opening.
     //    A nullifier that is committed must match the value proved later; the
     //    Rescue contract separately enforces per-round nullifier uniqueness.
-    let mut sum_acc = 0;
+    let mut sum_acc: u64 = 0;
     for i in 0..MAX_RESCUERS {
         // Range-check the amount so a malicious witness cannot wrap around and
         // inflate the sum (field arithmetic would otherwise allow overflow).
-        assert(amounts[i] < (1 << amount_bits), "amount out of range");
+        let amt: u64 = amounts[i] as u64;
+        assert(amt as Field == amounts[i], "amount out of range");
 
         // Bind amount/nullifier/secret to the commitment the contract saw.
-        let expected = poseidon2::Poseidon2::hash([amounts[i], nullifiers[i], secrets[i], round_id], 4);
+        let expected = pedersen_hash([amounts[i], nullifiers[i], secrets[i], round_id]);
         assert(expected == commitments[i], "commitment binding check failed");
 
         // Sum the (verifiably non-negative, range-bounded) amounts.
-        sum_acc += amounts[i];
+        sum_acc += amt;
     }
 
     // 2. The aggregate rescue capacity must meet the recapitalization target.
     //    This is the heart of the protocol: Ethereum proves the sum cleared T
     //    without the individual amounts ever becoming public.
-    assert(sum_acc >= target, "aggregate commitments below rescue target");
+    assert(sum_acc >= target as u64, "aggregate commitments below rescue target");
+}
+
+// --- Unit tests for Gate 1: happy / underfunded / zero-slot / binding ---
+// These tests preserve the spec comments above and exercise the exact
+// gate checklist from docs/TODO.md:35 Phase 1.4 (happy sum>=T, underfunded
+// sum<T should fail, zero-slot hash(0,0,0,round_id) handling).
+
+#[test]
+fn test_happy_three_rescuers_meet_target() {
+    // Happy: 300+200+100 = 600 >= T=600, pad 3 zero slots with hash(0,0,0,round_id)
+    let round_id: Field = 1;
+    let target: Field = 600;
+    let amounts: [Field; MAX_RESCUERS] = [300, 200, 100, 0, 0, 0];
+    let nullifiers: [Field; MAX_RESCUERS] = [11, 22, 33, 0, 0, 0];
+    let secrets: [Field; MAX_RESCUERS] = [101, 102, 103, 0, 0, 0];
+    let mut commitments: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    for i in 0..MAX_RESCUERS {
+        commitments[i] = pedersen_hash([amounts[i], nullifiers[i], secrets[i], round_id]);
+    }
+    main(commitments, target, round_id, amounts, nullifiers, secrets);
+}
+
+#[test(should_fail_with = "aggregate commitments below rescue target")]
+fn test_underfunded_should_fail() {
+    // Underfunded: 100+100+100 = 300 < T=600 — must revert on sum>=T assert
+    let round_id: Field = 1;
+    let target: Field = 600;
+    let amounts: [Field; MAX_RESCUERS] = [100, 100, 100, 0, 0, 0];
+    let nullifiers: [Field; MAX_RESCUERS] = [11, 22, 33, 0, 0, 0];
+    let secrets: [Field; MAX_RESCUERS] = [101, 102, 103, 0, 0, 0];
+    let mut commitments: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    for i in 0..MAX_RESCUERS {
+        commitments[i] = pedersen_hash([amounts[i], nullifiers[i], secrets[i], round_id]);
+    }
+    main(commitments, target, round_id, amounts, nullifiers, secrets);
+}
+
+#[test(should_fail_with = "commitment binding check failed")]
+fn test_commitment_binding_must_match() {
+    // Binding: same nullifier/round but wrong amount -> commitment mismatch must fail
+    let round_id: Field = 1;
+    let target: Field = 600;
+    let amounts: [Field; MAX_RESCUERS] = [300, 200, 100, 0, 0, 0];
+    let nullifiers: [Field; MAX_RESCUERS] = [11, 22, 33, 0, 0, 0];
+    let secrets: [Field; MAX_RESCUERS] = [101, 102, 103, 0, 0, 0];
+    let mut commitments: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    for i in 0..MAX_RESCUERS {
+        commitments[i] = pedersen_hash([amounts[i], nullifiers[i], secrets[i], round_id]);
+    }
+    // Tamper amount for rescuer 0: commitment still for 300, witness now 999
+    let bad_amounts: [Field; MAX_RESCUERS] = [999, 200, 100, 0, 0, 0];
+    main(commitments, target, round_id, bad_amounts, nullifiers, secrets);
+}
+
+#[test]
+fn test_zero_slot_all_empty_with_zero_target_passes() {
+    // Zero-slot: 6 empty slots hash(0,0,0,round_id), T=0 should pass
+    let round_id: Field = 42;
+    let target: Field = 0;
+    let amounts: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    let nullifiers: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    let secrets: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    let mut commitments: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    for i in 0..MAX_RESCUERS {
+        commitments[i] = pedersen_hash([0, 0, 0, round_id]);
+    }
+    main(commitments, target, round_id, amounts, nullifiers, secrets);
+}
+
+#[test(should_fail_with = "aggregate commitments below rescue target")]
+fn test_zero_slot_empty_fails_with_nonzero_target() {
+    // Zero-slot: same 6 empty, T=600 must fail sum>=T
+    let round_id: Field = 42;
+    let target: Field = 600;
+    let amounts: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    let nullifiers: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    let secrets: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    let mut commitments: [Field; MAX_RESCUERS] = [0; MAX_RESCUERS];
+    for i in 0..MAX_RESCUERS {
+        commitments[i] = pedersen_hash([0, 0, 0, round_id]);
+    }
+    main(commitments, target, round_id, amounts, nullifiers, secrets);
 }
