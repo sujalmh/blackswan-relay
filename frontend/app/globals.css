@@ -4,21 +4,21 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --background: 36 33% 98%;
+    --foreground: 240 6% 6%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --primary: 243 75% 58.6%;
+    --card-foreground: 240 6% 6%;
+    --primary: 262 71% 50%;
     --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 243 75% 58.6%;
+    --secondary: 30 10% 96%;
+    --secondary-foreground: 240 6%  10%;
+    --muted: 30 6% 96%;
+    --muted-foreground: 25 5% 45%;
+    --accent: 30 6% 94%;
+    --accent-foreground: 240 6% 10%;
+    --border: 30 6% 90%;
+    --input: 30 6% 90%;
+    --ring: 262 71% 50%;
     --radius: 0.75rem;
   }
 }
@@ -28,31 +28,88 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-[#FFFCF5] text-[#0F0F10] antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
 
-/* Subtle mesh gradient header - light, modern, not generic dark */
-.mesh-bg {
-  background:
-    radial-gradient(at 40% 20%, hsla(243,75%,58%,0.14) 0px, transparent 50%),
-    radial-gradient(at 80% 0%, hsla(188,94%,42%,0.12) 0px, transparent 50%),
-    radial-gradient(at 0% 50%, hsla(355,87%,66%,0.08) 0px, transparent 50%),
-    radial-gradient(at 80% 50%, hsla(340,75%,55%,0.06) 0px, transparent 50%),
-    linear-gradient(to bottom, #ffffff, #fafafb);
+/* Editorial paper - flat, no gradients */
+.paper-bg {
+  background: #FFFCF5;
 }
 
-.glass-card {
-  @apply bg-white/70 backdrop-blur-xl border border-zinc-200/60 shadow-[0_8px_30px_rgba(0,0,0,0.06)] ;
+.hero-ink {
+  background: #FFFCF5;
+  border-bottom: 1px solid #E7E5E4;
 }
 
-.shimmer {
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
-  background-size: 200% 100%;
-  animation: shimmer 2s infinite;
+/* Paper cards - flat, border only, no heavy shadows */
+.paper-card {
+  @apply bg-white border border-[#E7E5E4] shadow-[0_1px_3px_rgba(12,10,9,0.04)];
 }
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+
+.dossier-card {
+  @apply bg-white border border-[#E7E5E4] shadow-[0_1px_2px_rgba(12,10,9,0.04)];
+  transition: border-color 0.2s, background-color 0.2s;
+}
+.dossier-card:hover {
+  @apply border-[#D6D3D1] bg-[#FAFAF9]/50;
+}
+.dossier-card.committed {
+  @apply border-emerald-200 bg-[#ECFDF5]/50;
+}
+
+/* Censor bar - flat black, no gradients */
+.censor-bar {
+  position: relative;
+  background: #0F0F10;
+  color: transparent;
+  overflow: hidden;
+  border-radius: 6px;
+  user-select: none;
+}
+
+/* Signal waveform - flat, no gradients */
+.waveform {
+  height: 28px;
+  background: #F5F5F4;
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid #E7E5E4;
+}
+.waveform-fill {
+  height: 100%;
+  background: #0F0F10;
+  transition: width 600ms cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+.waveform-fill.complete {
+  background: #065F46;
+}
+.waveform-leaked .waveform-fill {
+  background: #DC2626;
+}
+
+/* Step indicator */
+.step-number {
+  font-family: var(--font-geist-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+/* Focus visible for a11y */
+*:focus-visible {
+  outline: 2px solid #6D28D9;
+  outline-offset: 2px;
+}
+
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

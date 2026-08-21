@@ -35,6 +35,35 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        ink: {
+          DEFAULT: "#0F0F10",
+          light: "#1A1A1E",
+          muted: "#78716C",
+        },
+        paper: {
+          DEFAULT: "#FFFCF5",
+          deep: "#F5F1E8",
+          card: "#FFFFFF",
+        },
+        signal: {
+          DEFAULT: "#DC2626",
+          muted: "#991B1B",
+          bg: "#FEF2F2",
+        },
+        silence: {
+          DEFAULT: "#065F46",
+          light: "#047857",
+          bg: "#ECFDF5",
+        },
+        amber: {
+          DEFAULT: "#D97706",
+          bg: "#FFFBEB",
+        },
+        violet: {
+          DEFAULT: "#6D28D9",
+          light: "#7C3AED",
+          bg: "#F5F3FF",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -42,8 +71,23 @@ const config: Config = {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        sans: ["Inter", "Geist Sans", "system-ui", "sans-serif"],
-        mono: ["Geist Mono", "JetBrains Mono", "monospace"],
+        sans: ["var(--font-geist-sans)", "Inter", "system-ui", "sans-serif"],
+        display: ["var(--font-instrument-serif)", "Georgia", "serif"],
+        mono: ["var(--font-geist-mono)", "Geist Mono", "JetBrains Mono", "monospace"],
+      },
+      keyframes: {
+        "censor-reveal": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
+        "signal-pulse": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.5" },
+        },
+      },
+      animation: {
+        "censor-reveal": "censor-reveal 1.2s ease-in-out",
+        "signal-pulse": "signal-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
       },
     },
   },

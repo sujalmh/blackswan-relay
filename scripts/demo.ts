@@ -44,7 +44,7 @@ async function main() {
     await run("cheat-underfunded", "101");
     console.log("\n✅ Cheat underfunded: expected revert InvalidProof (simulates sum 300<600) — Gate 4 honest-vs-cheat branch PASS");
   } catch (e) {
-    console.log("\nNote: cheat-underfunded did not revert as InvalidProof — placeholder verifier may need empty proof check:", e);
+    console.log("\nNote: cheat-underfunded did not revert as expected — real UltraHonk verifier should reject the empty/invalid proof:", e);
   }
 
   try {

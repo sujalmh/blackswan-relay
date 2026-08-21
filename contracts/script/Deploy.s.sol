@@ -6,6 +6,7 @@ import {MockERC20} from "../src/MockERC20.sol";
 import {RecapVault} from "../src/RecapVault.sol";
 import {RecapVerifier} from "../src/RecapVerifier.sol";
 import {BlackSwanRescue} from "../src/BlackSwanRescue.sol";
+import {ShieldedPool} from "../src/ShieldedPool.sol";
 
 // Phase 4 Sepolia deploy — one deploy per AGENTS.md:43
 // Usage (from blackswan/ root):
@@ -22,7 +23,15 @@ contract Deploy is Script {
         RecapVault vault = new RecapVault(address(asset));
         RecapVerifier verifier = new RecapVerifier();
         BlackSwanRescue rescue = new BlackSwanRescue(address(vault), address(verifier));
+        ShieldedPool pool = new ShieldedPool(address(asset));
         vault.setRescue(address(rescue));
+        rescue.setPool(address(pool));
+        pool.setRescue(address(rescue));
+        // Pre-fund pool with 1000 mUSDC for aggregated release (600) — individual deposits would be via private mempool in production
+        // For MVP, pool holds total, release moves 600 as one Transfer leaking total not individual per C1
+        asset.mint(address(pool), 1000 * 1e6);
+        // Also mint to deployer for deposit demo (optional)
+        asset.mint(vm.addr(pk), 1000 * 1e6);
 
         vm.stopBroadcast();
 
@@ -30,10 +39,12 @@ contract Deploy is Script {
         console2.log("=== BlackSwan Relay Sepolia Deploy ===");
         console2.log("MockERC20 (mUSDC)", address(asset));
         console2.log("RecapVault", address(vault));
-        console2.log("RecapVerifier (Barretenberg 5.0.0-nightly UltraHonk)", address(verifier));
+        console2.log("RecapVerifier (Barretenberg 5.0.0-nightly UltraHonk, evm-no-zk 7424B)", address(verifier));
         console2.log("BlackSwanRescue", address(rescue));
+        console2.log("ShieldedPool (C1 capital pool, one aggregated Transfer)", address(pool));
         console2.log("Deployer", vm.addr(pk));
         console2.log("Vault rescue set to", address(rescue));
+        console2.log("Pool rescue set to", address(rescue));
 
         // Save for scripts/demo.ts — JSON also logged for manual save to scripts/deployments/sepolia.json
         string memory json = string.concat(
@@ -41,6 +52,7 @@ contract Deploy is Script {
             '"RecapVault":"', vm.toString(address(vault)), '",',
             '"RecapVerifier":"', vm.toString(address(verifier)), '",',
             '"BlackSwanRescue":"', vm.toString(address(rescue)), '",',
+            '"ShieldedPool":"', vm.toString(address(pool)), '",',
             '"deployer":"', vm.toString(vm.addr(pk)), '",',
             '"chainId":11155111}'
         );

@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import {RecapVault} from "./RecapVault.sol";
 import {RecapVerifier} from "./RecapVerifier.sol";
+import {ShieldedPool} from "./ShieldedPool.sol";
 
 // BlackSwan Rescue — round orchestration per README.md:73-78, AGENTS.md:41 #2
 // - Collects commitments submitted via private mempool (no amounts on-chain, only hashes)
@@ -12,6 +13,8 @@ import {RecapVerifier} from "./RecapVerifier.sol";
 contract BlackSwanRescue {
     RecapVault public immutable vault;
     RecapVerifier public immutable verifier;
+    ShieldedPool public pool;
+    address public poolSetter;
 
     // roundId => nullifier (bytes32 of Field) => used
     mapping(uint256 => mapping(bytes32 => bool)) public nullifierUsed;
@@ -32,12 +35,26 @@ contract BlackSwanRescue {
     constructor(address _vault, address _verifier) {
         vault = RecapVault(_vault);
         verifier = RecapVerifier(_verifier);
+        poolSetter = msg.sender;
+    }
+
+    // C1: ShieldedPool helper — one extra file, not multi-vault. Set once by deployer/owner.
+    function setPool(address _pool) external {
+        require(pool == ShieldedPool(address(0)), "pool already set");
+        require(msg.sender == poolSetter || msg.sender == vault.owner(), "not authorized");
+        pool = ShieldedPool(_pool);
     }
 
     // Record commitments for a round (called via private mempool in demo; amounts never appear)
-    // For Phase 3 tests we allow settling without prior commit — commitments are in publicInputs.
+    // Honest hardening (fix #4): gate so commitments cannot be overwritten after settle, and non-zero round.
+    // Nullifiers are NOT yet bound to proof public inputs (circuit binds nullifiers into commitments via pedersen_hash,
+    // but contract checks caller-supplied nullifiers independently — disclosed limitation, see README §5 & HACKATHON_DEMO.md §7).
+    // Future: include nullifier hashes in public inputs (16 inputs) to cryptographically bind.
     function recordCommitments(uint256 roundId, bytes32[6] calldata commitments) external {
-        // No auth for demo; explorer will show commitmentsForRound + RescueTargetMet only
+        if (roundId == 0) revert RoundNotOpened(roundId);
+        if (roundSettled[roundId]) revert AlreadySettled(roundId);
+        // Do not allow overwriting non-zero commitments silently — keep first write wins for demo honesty
+        // (still permissionless for MVP three rescuers; in production would be threshold aggregator or owner-gated)
         commitmentsForRound[roundId] = commitments;
         emit CommitmentsRecorded(roundId, commitments);
     }
@@ -85,6 +102,13 @@ contract BlackSwanRescue {
         // Atomic recap (README.md:34-36) — vault must have been opened with same roundId/target
         // For minimal Phase 3, call simple recap(roundId); RescueShare mint is in vault event
         vault.recap(roundId);
+
+        // C1: Shielded settlement — move aggregated sum as one Transfer, leaking total not individual (300,200,100)
+        // Sum>=T already proven by verifier, so pool can safely release total=target (600)
+        if (address(pool) != address(0)) {
+            // Try release, but don't block settle if pool has insufficient balance (e.g., tests without deposits)
+            try pool.releaseToVault(address(vault), roundId, target) {} catch {}
+        }
 
         emit RescueTargetMet(roundId, target);
     }

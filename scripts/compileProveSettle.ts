@@ -28,6 +28,22 @@ const ABI = parseAbi([
   "error AlreadySettled(uint256)",
   "error RoundNotOpened(uint256)",
   "error InvalidPublicInputs()",
+  "error ProofLengthWrongWithLogN(uint256 logN, uint256 actualLength, uint256 expectedLength)",
+]);
+
+const POOL_ABI = parseAbi([
+  "function deposit(bytes32 commitment, bytes32 nullifierHash) external",
+  "function releaseToVault(address vault, uint256 roundId, uint256 total) external",
+  "function poolBalance() view returns (uint256)",
+  "function commitmentRecorded(bytes32) view returns (bool)",
+  "event Deposit(bytes32 indexed commitment, bytes32 indexed nullifierHash)",
+  "event Released(address indexed vault, uint256 total, uint256 roundId)",
+]);
+
+const ERC20_ABI = parseAbi([
+  "function approve(address spender, uint256 amount) external returns (bool)",
+  "function balanceOf(address) view returns (uint256)",
+  "function mint(address to, uint256 amount) external",
 ]);
 
 const C0 = "0x09726b28aff94a2f70169b87dc9e689359dbe0b588664b645e6606c74ebc5196" as const;
@@ -39,22 +55,113 @@ function getEnv(name: string, fallback = "") {
   return process.env[name] || fallback;
 }
 
-async function sendPrivateOrPublic(walletClient: any, publicClient: any, request: any) {
+// Real private-mempool path: sign with account.signTransaction then POST raw to PRIVATE_RPC_URL via fetch
+// {jsonrpc:"2.0",method:"eth_sendPrivateTransaction",params:[{tx: raw}],id:1} or eth_sendRawTransaction
+// Only fallback to walletClient.writeContract on RPC failure. Keeps hash-only privacy (commitments C0..C3 never 300) and logs fallback per README.md:83.
+async function sendPrivateOrPublic(walletClient: any, publicClient: any, request: any, account: any) {
   const privateRpc = getEnv("PRIVATE_RPC_URL");
-  if (privateRpc && privateRpc !== "" && privateRpc.includes("flashbots")) {
-    console.log(`[private-mempool] Attempting eth_sendPrivateTransaction via ${privateRpc} ...`);
-    console.log("[private-mempool] Flashbots Protect endpoint set — amounts (commitments only) would be private. Broadcasting publicly for Sepolia demo (fallback, no amounts leak anyway — only hashes).");
-  } else if (privateRpc) {
-    console.log(`[private-mempool] PRIVATE_RPC_URL=${privateRpc} set — would use eth_sendPrivateTransaction, falling back to public for demo.`);
-  } else {
+  const hasPrivate = privateRpc && privateRpc !== "";
+  if (!hasPrivate) {
     console.log("[mempool] PRIVATE_RPC_URL empty — using public mempool (commitments are hashes only, so no amount signal leaks even publicly; see README.md:83).");
+    if (request.functionName || request.abi) return walletClient.writeContract(request);
+    return walletClient.sendTransaction(request);
   }
-  if (request.functionName || request.abi) {
-    const hash = await walletClient.writeContract(request);
+
+  console.log(`[private-mempool] Attempting eth_sendPrivateTransaction via ${privateRpc} ... (commitments hashes only, amounts hidden per README.md:83)`);
+  try {
+    // Build transaction for signing: handle contract-call request (address+abi+functionName) vs raw to/data
+    let to: `0x${string}` | undefined;
+    let data: `0x${string}` | undefined;
+    let value: bigint | undefined;
+
+    if (request.address && request.abi && request.functionName) {
+      to = request.address as `0x${string}`;
+      // request.data may already be present from simulateContract; otherwise encode
+      if ((request as any).data) {
+        data = (request as any).data as `0x${string}`;
+      } else {
+        const { encodeFunctionData } = await import("viem");
+        data = encodeFunctionData({
+          abi: request.abi,
+          functionName: request.functionName,
+          args: request.args,
+        }) as `0x${string}`;
+      }
+      value = (request as any).value ? BigInt((request as any).value) : undefined;
+    } else if ((request as any).to) {
+      to = (request as any).to as `0x${string}`;
+      data = (request as any).data as `0x${string}`;
+      value = (request as any).value ? BigInt((request as any).value) : undefined;
+    } else {
+      throw new Error("unknown request shape for private send");
+    }
+
+    // Prepare EIP-1559 fields
+    const fees = await publicClient.estimateFeesPerGas().catch(() => ({ maxFeePerGas: undefined, maxPriorityFeePerGas: undefined }));
+    const nonce = await publicClient.getTransactionCount({ address: account.address });
+    const gas = await publicClient.estimateGas({ account, to, data, value }).catch(() => undefined);
+
+    const tx: any = {
+      to,
+      data,
+      value,
+      nonce,
+      chainId: 11155111,
+      type: "eip1559" as const,
+    };
+    if (gas) tx.gas = gas;
+    if (fees.maxFeePerGas) tx.maxFeePerGas = fees.maxFeePerGas;
+    if (fees.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
+
+    const raw = await account.signTransaction(tx);
+    console.log(`[private-mempool] Signed raw ${raw.slice(0,10)}... ${raw.length} chars, POSTing to PRIVATE_RPC_URL`);
+
+    // Try eth_sendPrivateTransaction (Flashbots Protect) then eth_sendRawTransaction fallback
+    const methods = ["eth_sendPrivateTransaction", "eth_sendRawTransaction"];
+    let lastErr: any = null;
+    for (const method of methods) {
+      const payload = method === "eth_sendPrivateTransaction"
+        ? { jsonrpc: "2.0", id: 1, method, params: [{ tx: raw }] }
+        : { jsonrpc: "2.0", id: 1, method, params: [raw] };
+      try {
+        const res = await fetch(privateRpc, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const text = await res.text();
+        console.log(`[private-mempool] POST ${method} status ${res.status} body ${text.slice(0,500)}`);
+        if (!res.ok) {
+          lastErr = new Error(`HTTP ${res.status} ${text.slice(0,300)}`);
+          continue;
+        }
+        let j: any = null;
+        try { j = JSON.parse(text); } catch { j = null; }
+        if (j && j.error) {
+          lastErr = new Error(`RPC error ${JSON.stringify(j.error).slice(0,300)}`);
+          continue;
+        }
+        if (j && j.result && typeof j.result === "string" && j.result.startsWith("0x")) {
+          console.log(`[private-mempool] Private tx accepted ${j.result} -> https://sepolia.etherscan.io/tx/${j.result}`);
+          return j.result as `0x${string}`;
+        }
+        // Some endpoints return result directly or need to try next method
+        lastErr = new Error(`no result for ${method}: ${text.slice(0,300)}`);
+      } catch (e: any) {
+        lastErr = e;
+        console.log(`[private-mempool] ${method} failed: ${e.message?.slice(0,300)}`);
+      }
+    }
+    throw lastErr || new Error("private RPC failed");
+  } catch (e: any) {
+    console.log(`[private-mempool] Private send failed (${e.message?.slice(0,400)}), fallback to public broadcast (hashes only, no amount leak) per README.md:83`);
+    if (request.functionName || request.abi) {
+      const hash = await walletClient.writeContract(request);
+      return hash;
+    }
+    const hash = await walletClient.sendTransaction(request);
     return hash;
   }
-  const hash = await walletClient.sendTransaction(request);
-  return hash;
 }
 
 async function main() {
@@ -65,9 +172,12 @@ async function main() {
     process.exit(1);
   }
   const args = process.argv.slice(2);
-  const roundArg = args[args.indexOf("--round") + 1] || "1";
-  const targetArg = args[args.indexOf("--target") + 1] || "600";
-  const mode = args[args.indexOf("--mode") + 1] || "honest";
+  const roundIdx = args.indexOf("--round");
+  const roundArg = roundIdx !== -1 ? args[roundIdx + 1] : "1";
+  const targetIdx = args.indexOf("--target");
+  const targetArg = targetIdx !== -1 ? args[targetIdx + 1] : "600";
+  const modeIdx = args.indexOf("--mode");
+  const mode = modeIdx !== -1 ? args[modeIdx + 1] : "honest";
 
   let roundId = BigInt(roundArg);
   let target = BigInt(targetArg);
@@ -103,18 +213,20 @@ async function main() {
   let proof: `0x${string}`;
   const proofPath = path.resolve("circuits/rescue_circuit/target/proof/proof");
   if (!fs.existsSync(proofPath)) {
-    console.error(`[proof] Real UltraHonk proof not found at ${proofPath}. Run: nargo execute && bb prove --scheme ultra_honk -b target/rescue_circuit.json -w target/rescue_circuit.gz -o target/proof --oracle_hash keccak -k target/vk/vk`);
+    console.error(`[proof] Real UltraHonk proof not found at ${proofPath}. Run: nargo execute && bb prove --scheme ultra_honk -b target/rescue_circuit.json -w target/rescue_circuit.gz -o target/proof --verifier_target evm-no-zk -k target/vk/vk (or --oracle_hash keccak for ZK)`);
     process.exit(1);
   }
   const proofBytes = fs.readFileSync(proofPath);
   proof = `0x${proofBytes.toString("hex")}` as `0x${string}`;
-  console.log(`[proof] Loaded real UltraHonk proof ${proofBytes.length} bytes from ${proofPath} (Barretenberg 5.0.0-nightly, pedersen_hash, round 1, T=600)`);
+  console.log(`[proof] Loaded real UltraHonk proof ${proofBytes.length} bytes from ${proofPath} (Barretenberg 5.0.0-nightly, pedersen_hash, round 1, T=600, ${proofBytes.length===7424?"evm-no-zk (non-ZK)":"ZK"})`);
   let expectRevert = "";
 
   if (mode === "cheat-underfunded") {
     proof = "0x";
     expectRevert = "ProofLengthWrong";
-    console.log("[mode] cheat-underfunded: empty proof (simulates sum 300 < 600) — UltraHonk verifier reverts ProofLengthWrongWithLogN(15,0,8384)");
+    // Proof length depends on verifier flavor: 8384 for ZK, 7424 for non-ZK (LOG_N=15)
+    const expectedLen = proofBytes.length === 7424 ? 7424 : 8384;
+    console.log(`[mode] cheat-underfunded: empty proof — real UltraHonk verifier reverts ProofLengthWrongWithLogN(15,0,${expectedLen}). A genuine sum<T proof cannot exist (bb prove fails when sum<T).`);
   } else if (mode === "cheat-nullifier") {
     nullifiers = [
       "0x000000000000000000000000000000000000000000000000000000000000000b",
@@ -147,6 +259,44 @@ async function main() {
     effectiveTarget = 600n;
   }
 
+  // C1: ShieldedPool hash-only deposits (fix #1: no amount in calldata, no Transfer per deposit)
+  // Amounts 300,200,100 are private witnesses only; calldata is (commitment, nullifierHash) hashes only.
+  const poolAddr = (deploy as any).ShieldedPool as `0x${string}` | undefined;
+  const assetAddr = (deploy as any).MockERC20 as `0x${string}` | undefined;
+  if (poolAddr && assetAddr && mode === "honest") {
+    console.log(`\n[0/3] ShieldedPool hash-only deposits via ${poolAddr} (no amount in calldata, no Transfer — breakdown hidden) ...`);
+    try {
+      // Deposits are hash-only (commitment, nullifierHash) — no amount param, no token approval needed.
+      // Pool is pre-funded via Deploy.s.sol mint(pool,1000); release will move aggregated 600 as one Transfer (total public, breakdown hidden).
+      const deposits: [string, string][] = [
+        [C0, "0x000000000000000000000000000000000000000000000000000000000000000b"],
+        [C1, "0x0000000000000000000000000000000000000000000000000000000000000016"],
+        [C2, "0x0000000000000000000000000000000000000000000000000000000000000021"],
+      ];
+      for (const [comm, nullHash] of deposits) {
+        try {
+          const { request: depReq } = await publicClient.simulateContract({ address: poolAddr, abi: POOL_ABI, functionName: "deposit", args: [comm as `0x${string}`, nullHash as `0x${string}`], account });
+          const depHash = await sendPrivateOrPublic(walletClient, publicClient, depReq, account);
+          console.log(`  deposit hash ${comm.slice(0,10)} nullifier ${nullHash.slice(0,10)} -> ${depHash} (calldata: commitment+nullifier only, no 0x...012c amount leak)`);
+          await publicClient.waitForTransactionReceipt({ hash: depHash });
+        } catch (e: any) {
+          const msg = e.message || "";
+          if (msg.includes("commitment reused") || msg.includes("nullifier reused")) {
+            console.log(`  deposit ${comm.slice(0,10)} already recorded (hash-only, idempotent) — skip`);
+          } else {
+            console.log(`  deposit ${comm.slice(0,10)} failed: ${e.message?.slice(0,300)}`);
+          }
+        }
+      }
+      const poolBal = await publicClient.readContract({ address: poolAddr, abi: POOL_ABI, functionName: "poolBalance" }) as bigint;
+      console.log(`  pool balance ${poolBal} (pre-funded 1000, will release aggregated 600 on settle — breakdown hidden, total public)`);
+    } catch (e: any) {
+      console.log(`  ShieldedPool deposit helper failed: ${e.message?.slice(0,400)} (pool pre-funded with 1000, so release will still succeed)`);
+    }
+  } else if (poolAddr && mode !== "honest") {
+    console.log(`\n[0/3] ShieldedPool skip deposits for mode ${mode} (only honest needs hash-only deposits)`);
+  }
+
   // Step 1: ensure round is open
   console.log(`\n[1/3] ensure RoundOpened ${effectiveRoundId} target ${effectiveTarget} ...`);
   try {
@@ -157,7 +307,7 @@ async function main() {
       args: [effectiveRoundId, effectiveTarget],
       account,
     });
-    const hashOpen = await sendPrivateOrPublic(walletClient, publicClient, openReq);
+    const hashOpen = await sendPrivateOrPublic(walletClient, publicClient, openReq, account);
     console.log(`  openRound tx ${hashOpen} -> https://sepolia.etherscan.io/tx/${hashOpen}`);
     await publicClient.waitForTransactionReceipt({ hash: hashOpen });
   } catch (e: any) {
@@ -182,7 +332,7 @@ async function main() {
           args: [effectiveRoundId, effectiveTarget],
           account,
         });
-        const hashOpen2 = await sendPrivateOrPublic(walletClient, publicClient, openReq2);
+        const hashOpen2 = await sendPrivateOrPublic(walletClient, publicClient, openReq2, account);
         console.log(`  openRound retry tx ${hashOpen2} -> https://sepolia.etherscan.io/tx/${hashOpen2}`);
         await publicClient.waitForTransactionReceipt({ hash: hashOpen2 });
       } catch (e2: any) {
@@ -210,7 +360,7 @@ async function main() {
       args: [proof, publicInputs, nullifiers],
       account,
     });
-    const hash = await sendPrivateOrPublic(walletClient, publicClient, request);
+    const hash = await sendPrivateOrPublic(walletClient, publicClient, request, account);
     console.log(`  settle tx ${hash} -> https://sepolia.etherscan.io/tx/${hash}`);
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     console.log(`  receipt status ${receipt.status} block ${receipt.blockNumber} gas ${receipt.gasUsed}`);
@@ -221,7 +371,7 @@ async function main() {
       console.log(`\n❌ settle reverted (status 0) — check revert reason above`);
     }
     if (expectRevert && receipt.status === "success") {
-      console.log(`⚠️  Expected revert ${expectRevert} but got success — placeholder verifier may have accepted; real bb verifier will enforce sum>=T`);
+      console.log(`⚠️  Expected revert ${expectRevert} but got success — real bb verifier should have rejected the invalid/empty proof`);
     }
   } catch (e: any) {
     const msg = e.message || String(e);
@@ -236,7 +386,7 @@ async function main() {
   }
 
   console.log("\nDone. See README.md:116-122 demo script: public leaks vs BlackSwan private (hashes only) vs cheat reject.");
-  console.log("Note: proof is real UltraHonk (bb 5.0.0-nightly, pedersen_hash) for round 1 — bb prove -b target/rescue_circuit.json -w target/rescue_circuit.gz --oracle_hash keccak -k target/vk/vk");
+  console.log("Note: proof is real UltraHonk (bb 5.0.0-nightly, pedersen_hash) for round 1 — bb prove --scheme ultra_honk -b target/rescue_circuit.json -w target/rescue_circuit.gz --verifier_target evm-no-zk -k target/vk/vk (7424B, non-ZK; ZK would be 8384B via --oracle_hash keccak)");
 }
 
 main().catch((e) => {
