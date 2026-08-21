@@ -4,7 +4,7 @@
 
 > A private rescue-yield market on Sepolia: 3 rescuers lock `hash(amount, nullifier, secret, round)` through a private mempool, a Noir circuit proves `sum ≥ 600`, and one atomic transaction settles the rescue. Explorer shows only `RescueTargetMet` + hashes + one aggregated `Transfer(600)` — individual `300/200/100` never appear in mempool or breakdown.
 
-[![Sepolia](https://img.shields.io/badge/network-Sepolia%20%7C%2011155111-3B82F6)](https://sepolia.etherscan.io/address/0xf4C8151696BBB9ad2EF117c7Aff944AdFa87E81f)
+[![Sepolia](https://img.shields.io/badge/network-Sepolia%20%7C%2011155111-3B82F6)](https://sepolia.etherscan.io/address/0xDD8BB798E9A7128F92D18dD9DF63bA05A5893ae6)
 [![Noir](https://img.shields.io/badge/Noir-1.0.0--beta.26-7C3AED)](https://noir-lang.org)
 [![Barretenberg](https://img.shields.io/badge/Barretenberg-5.0.0--nightly-0F172A)](https://github.com/AztecProtocol/barretenberg)
 [![Foundry](https://img.shields.io/badge/Foundry-1.7.1-000000)](https://getfoundry.sh)
@@ -219,12 +219,12 @@ flowchart LR
 | Contract | Address | Etherscan |
 |---|---|---|
 | `MockERC20` mUSDC | `0x491106810FB442Ec0C8071B76dEE3e17c8A9E9D5` | [view](https://sepolia.etherscan.io/address/0x491106810FB442Ec0C8071B76dEE3e17c8A9E9D5) |
-| `RecapVault` | `0xD1eA21240544768A0ef4Da7bC822cE13Ba018017` | [view](https://sepolia.etherscan.io/address/0xD1eA21240544768A0ef4Da7bC822cE13Ba018017) |
+| `RecapVault` | `0x62447c4574576283277528A327630033d2897c58` | [view](https://sepolia.etherscan.io/address/0x62447c4574576283277528A327630033d2897c58) |
 | `RecapVerifier` | `0xc8367A0f210EC10D146ae915871B5B52A78deA4b` · `46515B` · `N=32768` | [view](https://sepolia.etherscan.io/address/0xc8367A0f210EC10D146ae915871B5B52A78deA4b) |
-| `BlackSwanRescue` | `0xf4C8151696BBB9ad2EF117c7Aff944AdFa87E81f` | [view](https://sepolia.etherscan.io/address/0xf4C8151696BBB9ad2EF117c7Aff944AdFa87E81f) |
-| `ShieldedPool` | `0x08B6A8B5dcb3a19EaDE9d5E67bD9Ed5B325b1762` | [view](https://sepolia.etherscan.io/address/0x08B6A8B5dcb3a19EaDE9d5E67bD9Ed5B325b1762) |
+| `BlackSwanRescue` | `0xDD8BB798E9A7128F92D18dD9DF63bA05A5893ae6` | [view](https://sepolia.etherscan.io/address/0xDD8BB798E9A7128F92D18dD9DF63bA05A5893ae6) |
+| `ShieldedPool` | `0x2Fdd2Af239AD7D92c613562003191c0b125f5882` | [view](https://sepolia.etherscan.io/address/0x2Fdd2Af239AD7D92c613562003191c0b125f5882) |
 
-**Honest round 1** `300+200+100=600` → [`0xf373fa0d03a6b5d527588c9ef0ffe58c7438096d244e6466eb87dfe9f66e48e3`](https://sepolia.etherscan.io/tx/0xf373fa0d03a6b5d527588c9ef0ffe58c7438096d244e6466eb87dfe9f66e48e3) `block 11528814` `gas 2575830` `RescueTargetMet(1,600)` — logs: `NullifierUsed ×3` + `CommitmentsRecorded` + `VaultRecapped` + `Deposit(hash)×3` + `Transfer(600)` (no `300/200/100` breakdown).
+**Honest round 1** `300+200+100=600` → [`0xc03068e3ff9e2fdfcb73383290ab1eb41c76195e2293e83493bada2396cfd7fb`](https://sepolia.etherscan.io/tx/0xc03068e3ff9e2fdfcb73383290ab1eb41c76195e2293e83493bada2396cfd7fb) `block 11537134` `gas 2575830` `RescueTargetMet(1,600)` — logs: `NullifierUsed ×3` + `CommitmentsRecorded` + `VaultRecapped` + `Deposit(hash)×3` + `Transfer(600)` (no `300/200/100` breakdown).
 
 **Cheats**
 
@@ -307,7 +307,7 @@ forge test --match-path "test/*"         # 12/12
 npm --prefix frontend run build          # 25.9kB
 ~/.bb/bb verify --scheme ultra_honk --verifier_target evm-no-zk -k circuits/rescue_circuit/target/vk/vk -p circuits/rescue_circuit/target/proof/proof -i circuits/rescue_circuit/target/proof/public_inputs
 cast code 0xc8367A0f210EC10D146ae915871B5B52A78deA4b --rpc-url "$SEPOLIA_RPC_URL" | wc -c  # 46515
-cast receipt 0xf373fa0d03a6b5d527588c9ef0ffe58c7438096d244e6466eb87dfe9f66e48e3 --rpc-url "$SEPOLIA_RPC_URL" | grep -E "gasUsed|status"
+cast receipt 0xc03068e3ff9e2fdfcb73383290ab1eb41c76195e2293e83493bada2396cfd7fb --rpc-url "$SEPOLIA_RPC_URL" | grep -E "gasUsed|status"
 ```
 
 **Honest limitations (not hidden)**
