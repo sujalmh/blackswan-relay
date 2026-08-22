@@ -164,7 +164,7 @@ export default function Page() {
     setSettled(null); setTxHash(null); setProving(false); setCommittingId(null);
   };
 
-  // Fix #2 & #6: use real 7424B proof file when available; surface real tx hash, demo-mode labeled otherwise
+  // Fix #2 & #6: use real 8384B proof file when available; surface real tx hash, demo-mode labeled otherwise
   const [demoMode, setDemoMode] = useState(false);
   const settleHonest = async () => {
     if (!canSettle) return;
@@ -174,7 +174,7 @@ export default function Page() {
       const nullifiers = rescuers.map((r) => (r.id === 1 ? 11 : r.id === 2 ? 22 : 33));
       const secrets = rescuers.map((r) => (r.id === 1 ? 101 : r.id === 2 ? 102 : 103));
       const commitments = rescuers.map((r) => r.hash).concat([HASHES.C3, HASHES.C3, HASHES.C3]).slice(0, 6);
-      // Fix #6: proveRescue now attempts to load real proof (circuits/rescue_circuit/target/proof/proof) via fetch if bundled; falls back to synthetic 7424B for offline demo
+      // Fix #6: proveRescue now attempts to load real proof (circuits/rescue_circuit/target/proof/proof) via fetch if bundled; falls back to synthetic 8384B for offline demo
       const { proof, publicInputs } = await proveRescue({
         commitments, target: 600, round_id: 1,
         amounts: [...amounts, 0, 0, 0], nullifiers: [...nullifiers, 0, 0, 0], secrets: [...secrets, 0, 0, 0],
@@ -215,7 +215,7 @@ export default function Page() {
       const pc = await getPublicClient(); const wc = await getWalletClient();
       if (type === "cheat-underfunded" && wc) {
         try {
-          // Fix #2: use real verifier revert path — empty proof triggers ProofLengthWrongWithLogN(15,0,7424) 0x59895a53
+          // Fix #2: use real verifier revert path — empty proof triggers ProofLengthWrongWithLogN(15,0,8384) 0x59895a53
           await sendPrivateTransaction({ address: DEPLOY.BlackSwanRescue, abi: RESCUE_ABI, functionName: "settle", args: ["0x" as `0x${string}`, [...Array(8)].map(() => ("0x" + "0".repeat(64)) as `0x${string}`), [...Array(6)].map(() => ("0x" + "0".repeat(64)) as `0x${string}`) as any] }, pc, wc);
         } catch (e:any) {
           console.log("[cheat-underfunded] reverted as expected", e?.message?.slice(0,200));
@@ -223,12 +223,12 @@ export default function Page() {
       }
       if (type === "cheat-nullifier" && wc && settled !== "honest") {
         try {
-          // Use real proof bytes length (7424) with dup nullifiers [11,11,33] -> NullifierReused 0x61fef174 when round not settled, or AlreadySettled after honest
-          const { proof: realProof } = await proveRescue({ commitments: [HASHES.C0,HASHES.C0,HASHES.C2,HASHES.C3,HASHES.C3,HASHES.C3], target: 600, round_id: 1, amounts: [300,300,100,0,0,0], nullifiers: [11,11,33,0,0,0], secrets: [101,101,103,0,0,0] }).catch(()=>({ proof: ("0x"+"00".repeat(7424)) as string, publicInputs: [] }));
+          // Use real proof bytes length (8384) with dup nullifiers [11,11,33] -> NullifierReused 0x61fef174 when round not settled, or AlreadySettled after honest
+          const { proof: realProof } = await proveRescue({ commitments: [HASHES.C0,HASHES.C0,HASHES.C2,HASHES.C3,HASHES.C3,HASHES.C3], target: 600, round_id: 1, amounts: [300,300,100,0,0,0], nullifiers: [11,11,33,0,0,0], secrets: [101,101,103,0,0,0] }).catch(()=>({ proof: ("0x"+"00".repeat(8384)) as string, publicInputs: [] }));
           const commitments = [HASHES.C0, HASHES.C0, HASHES.C2, HASHES.C3, HASHES.C3, HASHES.C3];
           const publicInputs = [...commitments, "0x" + (600).toString(16).padStart(64, "0"), "0x" + (1).toString(16).padStart(64, "0")] as `0x${string}`[];
-          // Use realProof if available length 7424, else empty will still trigger length check; dup nullifier path is the point
-          const proofToUse = realProof && realProof.length === 2+7424*2 ? realProof as `0x${string}` : ("0x" + "00".repeat(7424)) as `0x${string}`;
+          // Use realProof if available length 8384, else empty will still trigger length check; dup nullifier path is the point
+          const proofToUse = realProof && realProof.length === 2+8384*2 ? realProof as `0x${string}` : ("0x" + "00".repeat(8384)) as `0x${string}`;
           await sendPrivateTransaction({ address: DEPLOY.BlackSwanRescue, abi: RESCUE_ABI, functionName: "settle", args: [proofToUse, publicInputs, [11,11,33,0,0,0].map((n)=>("0x"+BigInt(n).toString(16).padStart(64,"0")) as `0x${string}`) as any] }, pc, wc);
         } catch (e:any) {
           console.log("[cheat-nullifier] reverted as expected", e?.message?.slice(0,200));
@@ -247,7 +247,7 @@ export default function Page() {
             <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[#0F0F10] text-white"><Shield className="h-3.5 w-3.5" /></div>
             <span className="text-[13px] font-semibold tracking-tight">BlackSwan Relay</span>
             <span className="hidden sm:inline-flex rounded-full bg-[#0F0F10] px-2 py-0.5 font-mono text-[10px] leading-none tracking-wide text-white">SEPOLIA • 11155111</span>
-            <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-200" title="Hash-only deposits hide amounts; private RPC attempted, fallback to public is logged — see HACKATHON_DEMO.md §7"><span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" /> Private mempool • hashes only (fallback logged)</span>
+            <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200" title="Hash-only calldata 0xe9ceb85f 0972… 000b has no 012c even over public mempool; private RPC orthogonal — see docs/PRIVATE_MEMPOOL.md"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Hash-only • mempool-agnostic</span>
           </div>
           <div className="flex items-center gap-2 text-xs">
             <span className="font-mono text-[#A8A29E]">{String(slide+1).padStart(2,"0")} / {String(SLIDES.length).padStart(2,"0")}</span>
@@ -263,7 +263,7 @@ export default function Page() {
           {slide === 0 && (
             <div className="flex flex-1 flex-col justify-center">
               <div className="max-w-[660px]">
-                <div className="inline-flex rounded-full bg-[#FFFBEB] px-3 py-1 text-[11px] font-medium tracking-wide text-[#92400E] ring-1 ring-amber-200">Road to Devcon • Private DeFi &amp; Mempools • Overall — live on Sepolia testnet</div>
+                <div className="inline-flex rounded-full bg-[#FFFBEB] px-3 py-1 text-[11px] font-medium tracking-wide text-[#92400E] ring-1 ring-amber-200">Road to Devcon • Overall — Private Rescue Primitive • live on Sepolia testnet</div>
                 <h1 className="mt-6 font-display text-[40px] font-normal leading-[0.95] tracking-[-0.03em] sm:text-[52px]">A rescue<br /><span className="relative inline-block"><span className="relative z-10">that doesn't leak the price.</span><span className="absolute bottom-1 left-0 z-0 h-3 w-full bg-[#0F0F10]/[0.06]" /></span></h1>
                 <p className="mt-5 max-w-[560px] text-[15px] leading-6 text-[#57534E]">A lending vault is underwater and needs <span className="font-medium text-[#0F0F10]">$600 to survive</span>. Three rescuers want the discounted yield — but if they publish “I’ll give 300”, MEV bots copy the trade and kill the rescue. We hide each amount until Ethereum proves the total is enough.</p>
                 <div className="mt-4 rounded-xl border bg-white p-4 ring-1 ring-[#E7E5E4]">
@@ -515,7 +515,7 @@ export default function Page() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3 text-white">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10"><Zap className="h-5 w-5"/></div>
-                    <div><div className="text-sm font-semibold">Secret total 600 • proof 7424 bytes</div><div className="font-mono text-xs text-[#A8A29E]">Verified on Sepolia • 1 click • ShieldedPool releases 600 at once</div></div>
+                    <div><div className="text-sm font-semibold">Secret total 600 • proof 8384 bytes ZK</div><div className="font-mono text-xs text-[#A8A29E]">Verified on Sepolia • 1 click • ShieldedPool 600 aggregated (ZK keccak)</div></div>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <Button disabled={!canSettle} onClick={settleHonest} className="rounded-full bg-white px-5 text-[#0F0F10] hover:bg-[#F5F5F4] disabled:opacity-40">{proving? <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900"/> Proving…</span> : <span className="inline-flex items-center gap-1">Settle — prove &amp; save vault <ArrowRight className="h-3.5 w-3.5"/></span>}</Button>
@@ -552,7 +552,7 @@ export default function Page() {
                 ) : settled==="cheat-underfunded" ? (
                   <div className="rounded-2xl border border-rose-200 bg-[#FEF2F2] p-5 flex gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#DC2626] text-white"><XCircle className="h-5 w-5"/></div>
-                    <div><div className="font-semibold text-[#991B1B]">Rejected — verifier proof check (sum&lt;T)</div><p className="mt-1 text-sm leading-6 text-[#7F1D1D]">Cheater <span className="font-mono">100+100+100=300 &lt;600</span> with empty <span className="font-mono">0x</span>. Verifier reverted <span className="font-mono bg-white px-1 rounded">ProofLengthWrongWithLogN(15,0,7424)</span></p></div>
+                    <div><div className="font-semibold text-[#991B1B]">Rejected — verifier proof check (sum&lt;T)</div><p className="mt-1 text-sm leading-6 text-[#7F1D1D]">Cheater <span className="font-mono">100+100+100=300 &lt;600</span> with empty <span className="font-mono">0x</span>. Verifier reverted <span className="font-mono bg-white px-1 rounded">ProofLengthWrongWithLogN(15,0,8384)</span> (was 7424 non-ZK)</p></div>
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-rose-200 bg-[#FEF2F2] p-5 flex gap-3">
@@ -645,7 +645,7 @@ export default function Page() {
                   <div className="rounded-lg bg-[#ECFDF5] px-3 py-2 ring-1 ring-emerald-200 text-emerald-800">Live walkthrough validated: 6 slides • private commits via eth_sendPrivateTransaction (fallback logged) → CommitmentsRecorded hashes • reveal toggle → settle 0xf373… 2575830 gas • reverts ProofLengthWrong & NullifierReused</div>
                 </div>
               </details>
-              <div className="mt-8 border-t pt-6 text-center font-mono text-[11px] tracking-wide text-[#A8A29E]">Built for Road to Devcon • Private DeFi &amp; Mempools — Noir 1.0.0-beta.26 • Foundry • viem 2.37.13 • Sepolia testnet (no real crypto) • Private mempool fallback logged</div>
+              <div className="mt-8 border-t pt-6 text-center font-mono text-[11px] tracking-wide text-[#A8A29E]">Built for Road to Devcon • Private DeFi &amp; Mempools — Noir 1.0.0-beta.26 • Foundry • viem 2.37.13 • Sepolia testnet (no real crypto) • hash-only • mempool-agnostic</div>
             </div>
           )}
         </div>

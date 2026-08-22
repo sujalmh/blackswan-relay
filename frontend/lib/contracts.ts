@@ -2,11 +2,11 @@
 // Uses window.ethereum if available, fallback to privateKey from .env for demo via viem privateKeyToAccount
 
 export const DEPLOY = {
-  MockERC20: "0x491106810FB442Ec0C8071B76dEE3e17c8A9E9D5" as const,
-  RecapVault: "0x62447c4574576283277528A327630033d2897c58" as const,
-  RecapVerifier: "0xc8367A0f210EC10D146ae915871B5B52A78deA4b" as const,
-  BlackSwanRescue: "0xDD8BB798E9A7128F92D18dD9DF63bA05A5893ae6" as const,
-  ShieldedPool: "0x2Fdd2Af239AD7D92c613562003191c0b125f5882" as const,
+  MockERC20: "0x1076aAE7B0eA654F6592fE8FADA547A1E6aFed38" as const,
+  RecapVault: "0xc93AE9ba07819b4691e554Cd78E50B784B710666" as const,
+  RecapVerifier: "0x6b79fB1929A49b58d8Bfd0e31773e29E3Bf4FD52" as const,
+  BlackSwanRescue: "0xCb19d811cEe4657bef2128eDA51C09378E7D1A95" as const,
+  ShieldedPool: "0xeb8f0141949Cf141491faea65fbC91847dca8C35" as const,
 };
 
 export const EXPLORER = "https://sepolia.etherscan.io";
@@ -37,10 +37,14 @@ export const RESCUE_ABI = [
 
 export const SHIELDED_POOL_ABI = [
   { type: "function", name: "deposit", inputs: [{ name: "commitment", type: "bytes32" }, { name: "nullifierHash", type: "bytes32" }], outputs: [], stateMutability: "nonpayable" },
+  { type: "function", name: "depositReal", inputs: [{ name: "commitment", type: "bytes32" }, { name: "nullifierHash", type: "bytes32" }, { name: "amount", type: "uint256" }], outputs: [], stateMutability: "nonpayable" },
   { type: "function", name: "releaseToVault", inputs: [{ name: "vault", type: "address" }, { name: "roundId", type: "uint256" }, { name: "total", type: "uint256" }], outputs: [], stateMutability: "nonpayable" },
+  { type: "function", name: "releaseToVaultReal", inputs: [{ name: "vault", type: "address" }, { name: "roundId", type: "uint256" }, { name: "nullifiers", type: "bytes32[6]" }], outputs: [], stateMutability: "nonpayable" },
   { type: "function", name: "poolBalance", inputs: [], outputs: [{ type: "uint256" }], stateMutability: "view" },
+  { type: "function", name: "escrow", inputs: [{ name: "", type: "bytes32" }], outputs: [{ type: "uint256" }], stateMutability: "view" },
   { type: "event", name: "Deposit", inputs: [{ indexed: true, name: "commitment", type: "bytes32" }, { indexed: true, name: "nullifierHash", type: "bytes32" }] },
-] as const;
+  { type: "event", name: "Released", inputs: [{ indexed: true, name: "vault", type: "address" }, { name: "total", type: "uint256" }, { name: "roundId", type: "uint256" }] },
+] as const; // hybrid B hash-only + A depositReal escrow; Transfer leak documented in README §7
 
 export async function getPublicClient() {
   const { createPublicClient, http } = await import("viem");
@@ -70,9 +74,10 @@ export async function getWalletClient() {
 }
 
 export async function sendPrivateTransaction(request: any, publicClient: any, walletClient: any): Promise<string> {
+  // Hash-only • mempool-agnostic: calldata 0xe9ceb85f 0972… 000b has no 012c even over public mempool; private RPC is orthogonal defense-in-depth
   const hasPrivate = PRIVATE_RPC_URL && PRIVATE_RPC_URL !== "";
   if (!hasPrivate) {
-    console.log("[mempool] PRIVATE_RPC_URL empty — using public mempool (hashes only)");
+    console.log("[mempool] PRIVATE_RPC_URL empty — hash-only even if public (no amount in calldata, private RPC orthogonal; see docs/PRIVATE_MEMPOOL.md)");
     return walletClient.writeContract(request);
   }
   try {

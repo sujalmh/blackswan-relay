@@ -27,11 +27,11 @@ contract Deploy is Script {
         vault.setRescue(address(rescue));
         rescue.setPool(address(pool));
         pool.setRescue(address(rescue));
-        // Pre-fund pool with 1000 mUSDC for aggregated release (600) — individual deposits would be via private mempool in production
-        // For MVP, pool holds total, release moves 600 as one Transfer leaking total not individual per C1
+        // Hybrid funding: B demo pre-funds pool 1000 for aggregated 600 (theater, breakdown hidden) — keep for hash-only illustration
+        // A real escrow: mint to deployer 5000 for depositReal transferFrom demo (3 rescuers 300+200+100 + buffer). Pool not pre-funded via B in v1 if A path is primary.
+        // Keep B pre-fund for now for dual-mode; v1 script mints both so settle can pick B or A. Future: remove B mint when A is default.
         asset.mint(address(pool), 1000 * 1e6);
-        // Also mint to deployer for deposit demo (optional)
-        asset.mint(vm.addr(pk), 1000 * 1e6);
+        asset.mint(vm.addr(pk), 5000 * 1e6);
 
         vm.stopBroadcast();
 
@@ -39,9 +39,9 @@ contract Deploy is Script {
         console2.log("=== BlackSwan Relay Sepolia Deploy ===");
         console2.log("MockERC20 (mUSDC)", address(asset));
         console2.log("RecapVault", address(vault));
-        console2.log("RecapVerifier (Barretenberg 5.0.0-nightly UltraHonk, evm-no-zk 7424B)", address(verifier));
+        console2.log("RecapVerifier (Barretenberg 5.0.0-nightly UltraHonk, evm ZK keccak 8384B, N=32768)", address(verifier));
         console2.log("BlackSwanRescue", address(rescue));
-        console2.log("ShieldedPool (C1 capital pool, one aggregated Transfer)", address(pool));
+        console2.log("ShieldedPool (hybrid: B hash-only 1000->600 aggregated + A depositReal escrow, see README 7 honest limitations)", address(pool));
         console2.log("Deployer", vm.addr(pk));
         console2.log("Vault rescue set to", address(rescue));
         console2.log("Pool rescue set to", address(rescue));
