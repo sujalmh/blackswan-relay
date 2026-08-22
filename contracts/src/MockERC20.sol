@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 // Minimal ERC20 for Phase 2 — one token, fixed denominations for demo.
 // No upgrade, no fee, just mint + transfer for vault funding.
+// V1: gated mint (onlyOwner) to prevent open-mint theater; owner is deployer.
 contract MockERC20 {
     string public name = "Mock USDC";
     string public symbol = "mUSDC";
@@ -10,11 +11,20 @@ contract MockERC20 {
     uint256 public totalSupply;
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
+    address public owner;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
 
-    function mint(address to, uint256 amount) external {
+    constructor() {
+        owner = msg.sender;
+    }
+    modifier onlyOwner() {
+        require(msg.sender == owner, "not owner");
+        _;
+    }
+
+    function mint(address to, uint256 amount) external onlyOwner {
         balanceOf[to] += amount;
         totalSupply += amount;
         emit Transfer(address(0), to, amount);

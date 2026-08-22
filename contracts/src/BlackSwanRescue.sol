@@ -59,9 +59,11 @@ contract BlackSwanRescue {
         emit CommitmentsRecorded(roundId, commitments);
     }
 
-    // Settle: proof + publicInputs[8] = commitments[6] + target + roundId, plus nullifiers for uniqueness check
+    // Hybrid Settle: proof + publicInputs[8] = commitments[6] + target + roundId, plus nullifiers for uniqueness check
     // publicInputs layout per circuits/README.md:7 & src/main.nr:23-25: [commitments[6], target, round_id]
     // nullifiers: bytes32[6] corresponding to same MAX_RESCUERS, zero = empty slot (skipped for reuse check per vault spec)
+    // Hybrid: if ShieldedPool escrow exists for any nullifier -> A path (real DeFi, calls vault.recap with shares + pool.releaseToVaultReal)
+    //         else -> B path (simulation, hash-only pre-funded pool, vault.recap stub + releaseToVault)
     function settle(
         bytes calldata proof,
         bytes32[] calldata publicInputs,
@@ -81,12 +83,10 @@ contract BlackSwanRescue {
 
         // Per-round nullifier uniqueness (src/main.nr:8-9 comment; AGENTS.md:51 gate)
         // Zero nullifier = empty slot (hash(0,0,0,round_id) per circuits/README.md:7) — skip to allow 3 zero pads
-        // Single-loop checks storage + intra-batch duplicates (previous version split loops missed intra-batch)
         for (uint256 i = 0; i < 6; i++) {
             bytes32 n = nullifiers[i];
             if (n == bytes32(0)) continue;
             if (nullifierUsed[roundId][n]) revert NullifierReused(n);
-            // Mark immediately so duplicate in same batch (e.g. [11,11,33]) also reverts on second 11
             nullifierUsed[roundId][n] = true;
             emit NullifierUsed(roundId, n);
         }
@@ -99,15 +99,47 @@ contract BlackSwanRescue {
 
         roundSettled[roundId] = true;
 
-        // Atomic recap (README.md:34-36) — vault must have been opened with same roundId/target
-        // For minimal Phase 3, call simple recap(roundId); RescueShare mint is in vault event
-        vault.recap(roundId);
-
-        // C1: Shielded settlement — move aggregated sum as one Transfer, leaking total not individual (300,200,100)
-        // Sum>=T already proven by verifier, so pool can safely release total=target (600)
+        // Hybrid atomic recap + pool release
+        bool hasRealEscrow = false;
         if (address(pool) != address(0)) {
-            // Try release, but don't block settle if pool has insufficient balance (e.g., tests without deposits)
-            try pool.releaseToVault(address(vault), roundId, target) {} catch {}
+            for (uint256 i = 0; i < 6; i++) {
+                bytes32 n = nullifiers[i];
+                if (n == bytes32(0)) continue;
+                if (pool.escrow(n) > 0) { hasRealEscrow = true; break; }
+            }
+        }
+        if (hasRealEscrow) {
+            // A: real DeFi — derive rescuers/shares from escrow, call vault.recap with shares, then pool.releaseToVaultReal
+            uint256 cnt = 0;
+            for (uint256 i = 0; i < 6; i++) {
+                bytes32 n = nullifiers[i];
+                if (n == bytes32(0)) continue;
+                if (pool.escrow(n) > 0) cnt++;
+            }
+            address[] memory rescuers = new address[](cnt);
+            uint256[] memory shares = new uint256[](cnt);
+            uint256 idx = 0;
+            uint256 totalReal = 0;
+            for (uint256 i = 0; i < 6; i++) {
+                bytes32 n = nullifiers[i];
+                if (n == bytes32(0)) continue;
+                uint256 amt = pool.escrow(n);
+                if (amt == 0) continue;
+                rescuers[idx] = pool.depositor(n);
+                shares[idx] = amt;
+                totalReal += amt;
+                idx++;
+            }
+            require(totalReal >= target, "escrow < target");
+            vault.recap(roundId, rescuers, shares);
+            // release aggregated total via real path (clears escrows)
+            pool.releaseToVaultReal(address(vault), roundId, nullifiers);
+        } else {
+            // B: simulation — stub recap + pre-funded single Transfer (breakdown hidden, theater)
+            vault.recap(roundId);
+            if (address(pool) != address(0)) {
+                try pool.releaseToVault(address(vault), roundId, target) {} catch {}
+            }
         }
 
         emit RescueTargetMet(roundId, target);
