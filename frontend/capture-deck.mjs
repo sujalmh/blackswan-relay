@@ -7,15 +7,50 @@ const outDir = path.resolve("frontend/screenshots");
 fs.mkdirSync(outDir, { recursive: true });
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 page.on("console", m => console.log(`BROWSER ${m.type()}: ${m.text()}`));
 await page.goto(url, { waitUntil: "networkidle" });
 await page.waitForTimeout(1000);
 
+// Helper: bigger resolution, hide unwanted Etherscan links for cleaner submission, smooth-scroll page if tall
+async function smoothScrollIfNeeded() {
+  const { needs } = await page.evaluate(() => ({
+    needs: document.documentElement.scrollHeight > window.innerHeight * 1.1,
+  }));
+  if (needs) {
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await page.waitForTimeout(300);
+    await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" }));
+    await page.waitForTimeout(1100);
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+    await page.waitForTimeout(900);
+  }
+}
 async function shot(name) {
+  // Remove unwanted Etherscan links/details for cleaner submission image (keep only newest run's main UI)
+  await page.evaluate(() => {
+    document.querySelectorAll("details").forEach((d) => {
+      // keep header but hide the expandable content that contains old API links unless it's needed for proof
+      // For submission, hide all details blocks to keep image clean; Etherscan verification is in docs
+      if (d.textContent.includes("Etherscan proof")) d.style.display = "none";
+    });
+    // Also hide the tiny footer V2 API bar if present (unwanted links)
+    document.querySelectorAll("pre").forEach((p) => {
+      if (p.textContent.includes("GET /v2/api")) p.style.display = "none";
+    });
+  });
+  await page.waitForTimeout(200);
+  // Smooth-scroll page that exceeds viewport before fullPage capture (shows below-screen content)
+  await smoothScrollIfNeeded();
   const p = path.join(outDir, name);
   await page.screenshot({ path: p, fullPage: true });
-  console.log("saved", p);
+  console.log("saved", p, "1920x1080");
+  // Restore details for next interactions
+  await page.evaluate(() => {
+    document.querySelectorAll("details").forEach((d) => (d.style.display = ""));
+    document.querySelectorAll("pre").forEach((p) => (p.style.display = ""));
+  });
+  await page.waitForTimeout(200);
 }
 
 async function next() {
