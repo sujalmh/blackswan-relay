@@ -240,6 +240,9 @@ export default function Page() {
 
   return (
     <div className="min-h-screen bg-[#FFFCF5] text-[#0F0F10] flex flex-col">
+      <div className="bg-amber-50 border-b border-amber-200 px-6 py-2 text-center text-xs font-medium text-amber-900">
+        Demo frontend for judges - view only, not a production app. Use the slides to walk through the flow and verify each step on Sepolia via the Etherscan links.
+      </div>
       {/* top bar */}
       <header className="sticky top-0 z-40 border-b border-[#E7E5E4] bg-[#FFFCF5]/90 backdrop-blur">
         <div className="mx-auto flex max-w-[920px] items-center justify-between px-6 py-3">

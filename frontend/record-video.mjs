@@ -53,34 +53,48 @@ async function smoothScrollPage(label = "page") {
   await beat(1000);
 }
 
-// --- 00 Thesis (15s) — "A rescue that doesn't leak the price." ---
-console.log("00 Thesis — cover (1920×1080)");
-await beat(2000);
+// --- 00 Thesis (15s) — "A rescue that doesn't leak the price." — expand Sepolia deployments proof ---
+console.log("00 Thesis — cover (1920×1080) — expanding Sepolia deployments proof");
+await beat(1500);
+await page.evaluate(() => { document.querySelectorAll("details").forEach(d=>{ if(d.textContent.includes("Etherscan proof — deployments")||d.textContent.includes("Etherscan proof — deployments")) d.open=true; }); });
+await beat(800);
 await smoothScrollPage("00 Thesis");
-await beat(500);
+await beat(800);
 // Click "See the rescue" to go to next slide (or Next)
 await page.getByRole("button", { name: /See the rescue/ }).click().catch(async () => {
   await page.getByRole("button", { name: /^Next$/ }).click();
 });
 await beat(1000);
 
-// --- 01 Danger (12s) — vault 0.92, open round ---
-console.log("01 Danger — openRound");
-await beat(1500);
+// --- 01 Danger (12s) — vault 0.92, open round — FIX: wait for ● Round open and expand proof ---
+console.log("01 Danger — openRound (fresh run, expand Sepolia proof)");
+await beat(1200);
 const openBtn = page.getByRole("button", { name: /Open round/ });
-await openBtn.waitFor({ state: "visible", timeout: 5000 });
+await openBtn.waitFor({ state: "visible", timeout: 8000 });
 await beat(500);
-console.log("Clicking Open round — need 600");
+console.log("Clicking Open round — need 600 (3-wallet real escrow v2 will be shown later)");
 await openBtn.click();
-// Demo RPC will CORS-fail but handleOpenRound still sets vaultOpen after 600ms fallback; wait fixed time instead of text
-await beat(2500);
+console.log("Waiting for ● Round open result (was previously skipped)...");
+try {
+  await page.waitForFunction(() => document.body.innerText.includes("● Round open"), null, { timeout: 12000 });
+  console.log("✓ vault open confirmed: ● Round open visible");
+} catch {
+  console.log("vault open timeout — fallback wait 3500ms");
+  await beat(3500);
+}
+await beat(1000);
+// Expand Sepolia openRound proof for all-pages requirement
+await page.evaluate(() => {
+  document.querySelectorAll("details").forEach(d=>{ if(d.textContent.includes("Etherscan proof — openRound")) d.open=true; });
+});
+await beat(800);
 try {
   const txt = await page.evaluate(() => document.body.innerText);
-  console.log("After open, has Round open?", txt.includes("● Round open") || txt.includes("Round open"));
+  console.log("After open — has Round open?", txt.includes("● Round open"), "has Etherscan proof expanded?", txt.includes("Etherscan proof — openRound"));
 } catch {}
 await beat(500);
 await smoothScrollPage("01 Danger");
-await beat(500);
+await beat(800);
 // Next to commit (check enabled)
 const nextBtn1 = page.getByRole("button", { name: /^Next$/ });
 console.log("Next enabled after open?", !(await nextBtn1.isDisabled().catch(()=>true)));
@@ -112,18 +126,20 @@ for (let id = 1; id <= 3; id++) {
 }
 try {
   await page.waitForFunction(() => document.body.innerText.includes("600 / 600") || document.body.innerText.includes("3/3"), null, { timeout: 8000 });
-  console.log("Aggregate 600/600 3/3 confirmed");
-} catch {}
-await beat(1500);
-// Show Etherscan proof collapsible for deposits (hash-only)
-const proofToggle = page.getByText("Etherscan proof — 3 private deposits (Sepolia)").first();
-if (await proofToggle.isVisible().catch(() => false)) {
-  await proofToggle.click();
-  await beat(1200);
-  await beat(800);
+  console.log("Aggregate 600/600 3/3 confirmed — all 3 COMMITTED");
+} catch {
+  console.log("commit count 600/600 timeout — still proceeding, checking COMMITTED count", await page.locator("text=COMMITTED").count());
 }
+await beat(1000);
+// Expand Sepolia deposits proof for all-pages requirement
+await page.evaluate(() => {
+  document.querySelectorAll("details").forEach(d=>{ if(d.textContent.includes("Etherscan proof — 3 private deposits")||d.textContent.includes("Etherscan proof — 3 private")) d.open=true; });
+});
+await beat(800);
+console.log("Expanded Etherscan proof — 3 private deposits (hash-only, 3x Transfer for real escrow v2)");
+await beat(800);
 await smoothScrollPage("02 Commit");
-await beat(500);
+await beat(800);
 // Next to reveal
 await page.getByRole("button", { name: /^Next$/ }).click();
 await beat(800);
@@ -131,39 +147,43 @@ await beat(800);
 // --- 03 Reveal (12s) — Private vs Public toggle ---
 console.log("03 Reveal — Private • hashes only vs Public • amounts leaked");
 await beat(1200);
-// Stay on Private initially, let video capture green hashes-only
-await beat(1500);
-// Toggle to Public (red leaked)
+// Stay on Private initially, let video capture green hashes-only (v2 real escrow)
+await beat(1200);
+// Ensure Private is selected (hash-only) and Sepolia proof expanded
+await page.evaluate(() => {
+  document.querySelectorAll("details").forEach(d=>{ if(d.textContent.includes("Etherscan proof")) d.open=true; });
+});
+await beat(800);
+console.log("03 Reveal — Private • hashes only (expanded Sepolia CommitmentsRecorded)");
+await beat(1000);
+// Toggle to Public (red leaked) then back to Private for settle context
 const publicBtn = page.getByRole("button", { name: /Public \(leaks\)|Public • amounts leaked/ }).first();
 if (await publicBtn.isVisible().catch(() => false)) {
   await publicBtn.click();
-  await beat(2000);
-  // Back to Private for settle context
-  const privateBtn = page.getByRole("button", { name: /^Private$/ }).first().or(page.getByRole("button", { name: /Private • hashes only/ }).first());
-  // Try both selectors
+  console.log("Toggled to Public • amounts leaked (red)");
+  await beat(1800);
+  // Back to Private
   const pb = page.getByRole("button", { name: /Private • hashes only/ });
   if (await pb.isVisible().catch(() => false)) {
     await pb.click();
-    await beat(1200);
-  } else {
-    const p2 = page.getByRole("button", { name: "Private", exact: true });
-    if (await p2.isVisible().catch(() => false)) await p2.click();
+    console.log("Back to Private • hashes only");
     await beat(1200);
   }
 }
-// Expand Etherscan proof for CommitmentsRecorded
-const commitmentsProof = page.getByText("Etherscan proof — CommitmentsRecorded").first();
-if (await commitmentsProof.isVisible().catch(() => false)) {
-  await commitmentsProof.click();
-  await beat(1200);
-}
+// Ensure CommitmentsRecorded proof stays expanded
+await page.evaluate(() => {
+  document.querySelectorAll("details").forEach(d=>{ if(d.textContent.includes("CommitmentsRecorded")||d.textContent.includes("Etherscan proof — Commitments")) d.open=true; });
+});
+await beat(800);
 await smoothScrollPage("03 Reveal");
-await beat(500);
+await beat(800);
 await page.getByRole("button", { name: /^Next$/ }).click();
 await beat(800);
 
-// --- 04 Settle (15s) — prove 7424B, honest + cheats ---
-console.log("04 Settle — Secret total 600 • proof 7424 bytes");
+// --- 04 Settle (15s) — prove 8384B ZK 14-input bound, honest + cheats — expand Sepolia proof ---
+console.log("04 Settle — Secret total 600 • proof 8384 bytes ZK 14-input bound (v2)");
+await page.evaluate(() => { document.querySelectorAll("details").forEach(d=>{ if(d.textContent.includes("Etherscan proof — settle")||d.textContent.includes("Etherscan proof — reverts")) d.open=true; }); });
+await beat(500);
 await beat(1000);
 // Show awaiting state briefly
 await beat(1200);

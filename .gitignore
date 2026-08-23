@@ -83,3 +83,5 @@ circuits/README.md
 scripts/README.md
 frontend/README.md
 frontend/test-results/
+scripts/.env
+scripts/realEscrow3Wallets.ts

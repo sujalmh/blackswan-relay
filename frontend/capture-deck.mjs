@@ -27,29 +27,29 @@ async function smoothScrollIfNeeded() {
   }
 }
 async function shot(name) {
-  // Remove unwanted Etherscan links/details for cleaner submission image (keep only newest run's main UI)
+  // EXPAND Sepolia sections for all pages (user requested) — ensure Etherscan proofs are visible
   await page.evaluate(() => {
     document.querySelectorAll("details").forEach((d) => {
-      // keep header but hide the expandable content that contains old API links unless it's needed for proof
-      // For submission, hide all details blocks to keep image clean; Etherscan verification is in docs
-      if (d.textContent.includes("Etherscan proof")) d.style.display = "none";
+      if (d.textContent.includes("Etherscan proof") || d.textContent.includes("Etherscan")) {
+        d.open = true;
+        d.style.display = "";
+        // also ensure summary is visible
+        const s = d.querySelector("summary");
+        if (s) s.style.display = "";
+      }
     });
-    // Also hide the tiny footer V2 API bar if present (unwanted links)
     document.querySelectorAll("pre").forEach((p) => {
-      if (p.textContent.includes("GET /v2/api")) p.style.display = "none";
+      p.style.display = "";
     });
   });
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(400);
   // Smooth-scroll page that exceeds viewport before fullPage capture (shows below-screen content)
   await smoothScrollIfNeeded();
+  // Extra wait to ensure expanded details are rendered
+  await page.waitForTimeout(500);
   const p = path.join(outDir, name);
   await page.screenshot({ path: p, fullPage: true });
-  console.log("saved", p, "1920x1080");
-  // Restore details for next interactions
-  await page.evaluate(() => {
-    document.querySelectorAll("details").forEach((d) => (d.style.display = ""));
-    document.querySelectorAll("pre").forEach((p) => (p.style.display = ""));
-  });
+  console.log("saved", p, "1920x1080 - Sepolia expanded");
   await page.waitForTimeout(200);
 }
 
@@ -66,17 +66,38 @@ await next();
 console.log("slide 1 danger idle");
 await shot("01-danger-idle.png");
 
-// open round
+// open round — ensure Sepolia proof expanded and result visible (fix: was skipped)
 console.log("opening round");
 const openBtn = page.getByRole("button", { name: /Open round/ });
+await openBtn.waitFor({ state: "visible", timeout: 8000 });
+await page.waitForTimeout(500);
 await openBtn.click();
+console.log("clicked Open round, waiting for ● Round open + Etherscan proof...");
 try {
-  await page.waitForFunction(() => document.body.innerText.includes("● Round open"), null, { timeout: 8000 });
-  console.log("vault open confirmed");
-} catch { console.log("vault open timeout, fallback"); await page.waitForTimeout(2500); }
+  await page.waitForFunction(() => document.body.innerText.includes("● Round open"), null, { timeout: 12000 });
+  console.log("vault open confirmed: ● Round open visible");
+} catch { console.log("vault open timeout, fallback wait"); await page.waitForTimeout(3500); }
+await page.waitForTimeout(1000);
+// Ensure Etherscan proof for openRound is expanded before shot
+await page.evaluate(() => {
+  document.querySelectorAll("details").forEach(d=>{ if(d.textContent.includes("openRound")||d.textContent.includes("Etherscan proof — openRound")) d.open=true; });
+});
 await page.waitForTimeout(800);
-console.log("after open", await page.content().then(c=>c.includes("● Round open")?"open":"still closed"));
+const afterOpenText = await page.evaluate(()=>document.body.innerText);
+console.log("after open — has Round open?", afterOpenText.includes("● Round open"), "has Etherscan proof?", afterOpenText.includes("Etherscan proof — openRound"));
+await page.waitForTimeout(500);
 await shot("01-danger-open.png");
+// Verify Next is enabled before proceeding
+try {
+  const nextAfterOpen = page.getByRole("button", { name: /^Next$/ });
+  await nextAfterOpen.waitFor({ state: "visible", timeout: 5000 });
+  const disabled = await nextAfterOpen.isDisabled().catch(()=>false);
+  console.log("Next after open — disabled?", disabled, "waiting for enabled if needed");
+  if (disabled) {
+    await page.waitForFunction(() => { const b=document.evaluate(`//button[contains(.,'Next')]`,document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue; return b && !b.disabled; }, null, {timeout:5000}).catch(()=>{});
+  }
+  await page.waitForTimeout(800);
+} catch(e){ console.log("Next check after open failed", e.message?.slice(0,100)); }
 
 await next();
 console.log("slide 2 commit idle");

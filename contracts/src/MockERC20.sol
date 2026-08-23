@@ -16,6 +16,22 @@ contract MockERC20 {
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
 
+    // EIP-2612 permit mock — for shielded pool private deposits via permit (no separate approve tx)
+    // In production, verify EIP-712 signature; for mock, just set allowance (demo privacy via permit)
+    mapping(address => uint256) public nonces;
+    bytes32 public DOMAIN_SEPARATOR = keccak256("MockERC20");
+
+    function permit(address owner_, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external {
+        require(deadline >= block.timestamp, "permit expired");
+        // Mock: skip ecrecover check for demo — just set allowance, emit Approval
+        // Real FHEERC20 would verify Zama/Fhenix permit; here we keep private via off-chain signature not gossiped as separate tx
+        allowance[owner_][spender] = value;
+        emit Approval(owner_, spender, value);
+        nonces[owner_]++;
+        // silence unused warnings
+        v; r; s;
+    }
+
     constructor() {
         owner = msg.sender;
     }
