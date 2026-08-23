@@ -53,6 +53,7 @@ const ERC20_ABI = parseAbi([
 
 const C0 = "0x09726b28aff94a2f70169b87dc9e689359dbe0b588664b645e6606c74ebc5196" as const;
 const C1 = "0x1804bcccd6d51a2c6e89c38d57280cb32cc149d16b260ac341efccb3d3ff9da7" as const;
+const C1_DUP = "0x0f1028e961518dd44a6294c3f7a02e42c27b4176e1528078698add7db04d234b" as const; // pedersen_hash([200,11,102,1]) for dup test
 const C2 = "0x11d2f4a75e9382f6370873b63e1bf75d0e0b8f31b26f5e8fd0c6fa28e6de8d0a" as const;
 const C3 = "0x0252191f87d94cfa16f5de62f60d4c58f0899cbb2d437e58c1ad7bb55139b3b7" as const;
 
@@ -261,19 +262,20 @@ async function main() {
   }
   let proof: `0x${string}`;
   const proofPath = path.resolve("circuits/rescue_circuit/target/proof/proof");
+  const dupProofPath = path.resolve("circuits/rescue_circuit/target/proof_dup/proof");
   if (!fs.existsSync(proofPath)) {
-    console.error(`[proof] Real UltraHonk proof not found at ${proofPath}. Run: nargo execute && bb prove --scheme ultra_honk -b target/rescue_circuit.json -w target/rescue_circuit.gz -o target/proof --verifier_target evm-no-zk -k target/vk/vk (or --oracle_hash keccak for ZK)`);
+    console.error(`[proof] Real UltraHonk proof not found at ${proofPath}. Run: nargo execute && ~/.bb/bb prove -t evm -b target/rescue_circuit.json -w target/rescue_circuit.gz -o target/proof -k target/vk/vk`);
     process.exit(1);
   }
   const proofBytes = fs.readFileSync(proofPath);
   proof = `0x${proofBytes.toString("hex")}` as `0x${string}`;
-  console.log(`[proof] Loaded real UltraHonk proof ${proofBytes.length} bytes from ${proofPath} (Barretenberg 5.0.0-nightly, pedersen_hash, round 1, T=600, ${proofBytes.length===7424?"evm-no-zk (non-ZK)":"ZK"})`);
+  console.log(`[proof] Loaded real UltraHonk proof ${proofBytes.length} bytes from ${proofPath} (Barretenberg 5.0.0-nightly, pedersen_hash, 14 inputs 8384B ZK)`);
   let expectRevert = "";
 
   if (mode === "cheat-underfunded") {
     proof = "0x";
     expectRevert = "ProofLengthWrong";
-    // Proof length depends on verifier flavor: 8384 for ZK, 7424 for non-ZK (LOG_N=15)
+    // Proof length depends on verifier flavor: 8384 for ZK (14 inputs) vs 7424 old
     const expectedLen = proofBytes.length === 7424 ? 7424 : 8384;
     console.log(`[mode] cheat-underfunded: empty proof — real UltraHonk verifier reverts ProofLengthWrongWithLogN(15,0,${expectedLen}). A genuine sum<T proof cannot exist (bb prove fails when sum<T).`);
   } else if (mode === "cheat-nullifier") {
@@ -285,8 +287,17 @@ async function main() {
       "0x0000000000000000000000000000000000000000000000000000000000000000",
       "0x0000000000000000000000000000000000000000000000000000000000000000",
     ];
+    // For 14-input binding, commitments must match dup nullifiers: C1_DUP = hash(200,11,102,1)
+    commitments = [C0, C1_DUP, C2, C3, C3, C3];
+    if (fs.existsSync(dupProofPath)) {
+      const dupBytes = fs.readFileSync(dupProofPath);
+      proof = `0x${dupBytes.toString("hex")}` as `0x${string}`;
+      console.log(`[mode] cheat-nullifier: duplicate nullifier 11 — using dup proof ${dupBytes.length}B from ${dupProofPath} (commitments [C0,C1_DUP,C2])`);
+    } else {
+      console.log("[mode] cheat-nullifier: duplicate nullifier 11 — dup proof not found, using happy proof (will fail at InvalidProof due to binding)");
+    }
     expectRevert = "NullifierReused";
-    console.log("[mode] cheat-nullifier: duplicate nullifier 11");
+    console.log("[mode] cheat-nullifier: duplicate nullifier 11 (14-input bound, expects NullifierReused after valid dup proof)");
   } else if (mode === "public") {
     console.log("[mode] public: would leak amounts 300,200,100 directly — BlackSwan hides amounts, only commitments shown");
   } else {
@@ -426,13 +437,19 @@ async function main() {
     }
   }
 
-  const publicInputs: `0x${string}`[] = [...commitments, `0x${effectiveTarget.toString(16).padStart(64,"0")}` as `0x${string}`, `0x${effectiveRoundId.toString(16).padStart(64,"0")}` as `0x${string}`];
+  // 14 public inputs: commitments[6] + nullifier_hashes[6] + target + roundId
+  const publicInputs: `0x${string}`[] = [...commitments, ...nullifiers, `0x${effectiveTarget.toString(16).padStart(64,"0")}` as `0x${string}`, `0x${effectiveRoundId.toString(16).padStart(64,"0")}` as `0x${string}`];
+  if (publicInputs.length !== 14) {
+    console.error(`[error] publicInputs length ${publicInputs.length} !=14 (6+6+ target+roundId)`);
+    process.exit(1);
+  }
 
-  console.log(`\n[2/3] settle round ${effectiveRoundId} with proof ${proof.slice(0,10)}... and commitments hashes only (amounts hidden)`);
+  console.log(`\n[2/3] settle round ${effectiveRoundId} with proof ${proof.slice(0,10)}... (14 inputs: 6 commitments + 6 nullifier_hashes + T + roundId)`);
   console.log(`  commitments: ${commitments.slice(0,3).map(c=>c.slice(0,10)).join(", ")} + 3x zero-slot ${C3.slice(0,10)}`);
-  console.log(`  publicInputs[6]=target ${effectiveTarget} [7]=roundId ${effectiveRoundId}`);
-  console.log(`  nullifiers: ${nullifiers.slice(0,3).join(", ")}`);
-  if (expectRevert) console.log(`  expect revert: ${expectRevert} (real verifier: ProofLengthWrongWithLogN for empty proof)`);
+  console.log(`  nullifier_hashes: ${nullifiers.slice(0,3).map(c=>c.slice(0,10)).join(", ")} + 3x zero`);
+  console.log(`  publicInputs[12]=target ${effectiveTarget} [13]=roundId ${effectiveRoundId} (was 8-input, now 14-input bound)`);
+  console.log(`  nullifiers param: ${nullifiers.slice(0,3).join(", ")} (must equal publicInputs[6..11] for binding)`);
+  if (expectRevert) console.log(`  expect revert: ${expectRevert} (14-input verifier: ProofLengthWrongWithLogN(15,0,8384) for empty proof)`);
 
   console.log(`\n[3/3] calling BlackSwanRescue.settle ... (private-mempool aware, explorer will show only RescueTargetMet + hashes)`);
   try {

@@ -21,6 +21,7 @@ contract BlackSwanRescueTest is Test {
     bytes32 constant C1 = 0x1804bcccd6d51a2c6e89c38d57280cb32cc149d16b260ac341efccb3d3ff9da7;
     bytes32 constant C2 = 0x11d2f4a75e9382f6370873b63e1bf75d0e0b8f31b26f5e8fd0c6fa28e6de8d0a;
     bytes32 constant C3 = 0x0252191f87d94cfa16f5de62f60d4c58f0899cbb2d437e58c1ad7bb55139b3b7; // zero-slot commitment
+    bytes32 constant C1_DUP = 0x0f1028e961518dd44a6294c3f7a02e42c27b4176e1528078698add7db04d234b; // pedersen_hash([200,11,102,1]) for dup nullifier test
 
     uint256 constant ROUND_ID = 1;
     uint256 constant TARGET = 600;
@@ -53,18 +54,29 @@ contract BlackSwanRescueTest is Test {
         vault.openRound(rId, tgt);
     }
 
-    function _publicInputs(bytes32[6] memory comms, uint256 tgt, uint256 rId) internal pure returns (bytes32[] memory) {
-        bytes32[] memory inputs = new bytes32[](8);
+    function _publicInputs(bytes32[6] memory comms, bytes32[6] memory nullifiers, uint256 tgt, uint256 rId) internal pure returns (bytes32[] memory) {
+        bytes32[] memory inputs = new bytes32[](14);
         for (uint256 i = 0; i < 6; i++) inputs[i] = comms[i];
-        inputs[6] = bytes32(tgt);
-        inputs[7] = bytes32(rId);
+        for (uint256 i = 0; i < 6; i++) inputs[6 + i] = nullifiers[i];
+        inputs[12] = bytes32(tgt);
+        inputs[13] = bytes32(rId);
         return inputs;
     }
 
-    // Gate: valid round settles atomically (AGENTS.md:52)
+    function _publicInputsLegacy(bytes32[6] memory comms, uint256 tgt, uint256 rId) internal pure returns (bytes32[] memory) {
+        bytes32[] memory inputs = new bytes32[](14);
+        for (uint256 i = 0; i < 6; i++) inputs[i] = comms[i];
+        // legacy helper: nullifiers not yet bound — fill with happyNullifiers for 8-input migration
+        for (uint256 i = 0; i < 6; i++) inputs[6 + i] = bytes32(0);
+        inputs[12] = bytes32(tgt);
+        inputs[13] = bytes32(rId);
+        return inputs;
+    }
+
+    // Gate: valid round settles atomically (AGENTS.md:52) — now 14 inputs with nullifier binding
     function test_ValidRoundSettlesAtomically() public {
         _openRound(ROUND_ID, TARGET);
-        bytes32[] memory inputs = _publicInputs(happyCommitments, TARGET, ROUND_ID);
+        bytes32[] memory inputs = _publicInputs(happyCommitments, happyNullifiers, TARGET, ROUND_ID);
 
         vm.expectEmit(true, false, false, true);
         emit VaultRecapped(ROUND_ID, TARGET);
@@ -85,29 +97,47 @@ contract BlackSwanRescueTest is Test {
     // Gate: underfunded round rejected — empty proof reverts ProofLengthWrongWithLogN(15,0,8384) on real UltraHonk verifier
     function test_UnderfundedRoundRejected() public {
         _openRound(ROUND_ID, TARGET);
-        bytes32[] memory inputs = _publicInputs(happyCommitments, TARGET, ROUND_ID);
+        bytes32[] memory inputs = _publicInputs(happyCommitments, happyNullifiers, TARGET, ROUND_ID);
         bytes memory emptyProof = hex"";
         vm.expectRevert();
         rescue.settle(emptyProof, inputs, happyNullifiers);
     }
 
-    // Gate: reused nullifier rejected — duplicate nullifier in same settle must revert
+    // Gate: reused nullifier rejected — duplicate nullifier in same settle must revert (14-input binding)
+    // Uses a dedicated dup proof where commitments match dup nullifiers: C1_DUP = hash(200,11,102,1)
     function test_ReusedNullifierRejected() public {
         _openRound(ROUND_ID, TARGET);
-        bytes32[] memory inputs = _publicInputs(happyCommitments, TARGET, ROUND_ID);
+        bytes32[6] memory dupCommitments = [C0, C1_DUP, C2, C3, C3, C3];
         bytes32[6] memory dupNullifiers = [bytes32(uint256(11)), bytes32(uint256(11)), bytes32(uint256(33)), bytes32(0), bytes32(0), bytes32(0)];
+        bytes memory dupProof = vm.readFileBinary("../circuits/rescue_circuit/target/proof_dup/proof");
+        bytes32[] memory inputs = _publicInputs(dupCommitments, dupNullifiers, TARGET, ROUND_ID);
         vm.expectRevert(abi.encodeWithSelector(BlackSwanRescue.NullifierReused.selector, bytes32(uint256(11))));
-        rescue.settle(validProof, inputs, dupNullifiers);
+        rescue.settle(dupProof, inputs, dupNullifiers);
     }
 
     // Also test sequential reuse across two settles on different rounds vs same round
     function test_NullifierReuseAcrossSettlesSameRound() public {
         _openRound(ROUND_ID, TARGET);
-        bytes32[] memory inputs = _publicInputs(happyCommitments, TARGET, ROUND_ID);
+        bytes32[] memory inputs = _publicInputs(happyCommitments, happyNullifiers, TARGET, ROUND_ID);
         rescue.settle(validProof, inputs, happyNullifiers);
         // Second settle on same roundId should revert AlreadySettled, not NullifierReused (roundSettled guard)
         vm.expectRevert(abi.encodeWithSelector(BlackSwanRescue.AlreadySettled.selector, ROUND_ID));
         rescue.settle(validProof, inputs, happyNullifiers);
+    }
+
+    // Nullifier binding: shuffled nullifiers must fail InvalidPublicInputs before verifier
+    function test_NullifierBindingFailsOnShuffle() public {
+        _openRound(ROUND_ID, TARGET);
+        bytes32[6] memory shuffled = [bytes32(uint256(22)), bytes32(uint256(11)), bytes32(uint256(33)), bytes32(0), bytes32(0), bytes32(0)];
+        // Commitments still happy (C0 for 11, C1 for 22) but shuffled public nullifiers => binding fails in contract pre-check
+        bytes32[] memory inputs = _publicInputs(happyCommitments, happyNullifiers, TARGET, ROUND_ID);
+        // Try to submit shuffled nullifiers with honest inputs -> InvalidPublicInputs (contract checks publicInputs[6+i]==nullifiers[i])
+        vm.expectRevert(abi.encodeWithSelector(BlackSwanRescue.InvalidPublicInputs.selector));
+        rescue.settle(validProof, inputs, shuffled);
+        // Also mismatch case: attacker builds inputs with shuffled hashes but proof expects original -> proof invalid
+        bytes32[] memory shuffledInputs = _publicInputs(happyCommitments, shuffled, TARGET, ROUND_ID);
+        vm.expectRevert(); // InvalidProof or proof verify fail due to nullifier binding in circuit
+        rescue.settle(validProof, shuffledInputs, shuffled);
     }
 
     // Public comparison path: commitments visible, amounts hidden — demonstrate public path leaks signal
@@ -117,7 +147,7 @@ contract BlackSwanRescueTest is Test {
         // Public path: observer sees amounts [300,200,100] directly — signal visible
         uint256[3] memory publicAmounts = [uint256(300), uint256(200), uint256(100)];
         // BlackSwan path: observer sees only commitments[6] hashes + RescueTargetMet, amounts never appear
-        bytes32[] memory inputs = _publicInputs(happyCommitments, TARGET, ROUND_ID);
+        bytes32[] memory inputs = _publicInputs(happyCommitments, happyNullifiers, TARGET, ROUND_ID);
         // Public amounts are NOT passed to rescue.settle; only commitments + nullifiers are
         // Verify that private amounts are not in any BlackSwanRescue storage (only hashes)
         rescue.settle(validProof, inputs, happyNullifiers);
@@ -132,7 +162,7 @@ contract BlackSwanRescueTest is Test {
     function test_ZeroSlotHandling() public {
         _openRound(ROUND_ID, TARGET);
         // Already happyCommitments has 3 zero pads (C3)
-        bytes32[] memory inputs = _publicInputs(happyCommitments, TARGET, ROUND_ID);
+        bytes32[] memory inputs = _publicInputs(happyCommitments, happyNullifiers, TARGET, ROUND_ID);
         rescue.settle(validProof, inputs, happyNullifiers);
         assertTrue(vault.recapped());
     }
@@ -143,7 +173,7 @@ contract BlackSwanRescueTest is Test {
         _openRound(zeroRound, zeroTarget);
         bytes32[6] memory zeroComms = [C3, C3, C3, C3, C3, C3];
         bytes32[6] memory zeroNulls = [bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0), bytes32(0)];
-        bytes32[] memory inputs = _publicInputs(zeroComms, zeroTarget, zeroRound);
+        bytes32[] memory inputs = _publicInputs(zeroComms, zeroNulls, zeroTarget, zeroRound);
         bytes memory emptyProof = hex"";
         vm.expectRevert();
         rescue.settle(emptyProof, inputs, zeroNulls);

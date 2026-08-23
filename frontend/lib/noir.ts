@@ -9,9 +9,10 @@ export const HASHES = {
   C3: "0x0252191f87d94cfa16f5de62f60d4c58f0899cbb2d437e58c1ad7bb55139b3b7",
 } as const;
 
-// For Noir circuit MAX_RESCUERS=6, 8 public inputs: commitments[6] + target + round_id
+// For Noir circuit MAX_RESCUERS=6, 14 public inputs: commitments[6] + nullifier_hashes[6] + target + round_id (22 Honk with pairing)
 export type RescueWitness = {
   commitments: string[]; // hex bytes32[6]
+  nullifier_hashes?: string[]; // optional, derived from nullifiers if not supplied
   target: number;
   round_id: number;
   amounts: number[];
@@ -82,31 +83,31 @@ export async function pedersenHash(inputs: [number | string, number | string, nu
   }
 }
 
-// Prove wrapper — honest demo mode (fix #6)
-// Real flow: noir.execute({commitments, target, round_id, amounts, nullifiers, secrets}) → witness → bb.js prove 7424B via @aztec/bb.js
-// Frontend standalone cannot run bb wasm (~2M constraints) in-browser without bundling; so we:
-// 1) simulate noir.execute timing (pedersen_hash binding + sum≥T checked via noir.ts pedersenHash)
-// 2) attempt to fetch REAL proof file at /proof/proof (copied from circuits/rescue_circuit/target/proof/proof, 7424B, Barretenberg non-ZK)
-// 3) fallback to synthetic 7424B deterministic pattern ONLY for offline demo — labeled as demo in UI via demoMode flag
+// Prove wrapper — honest demo mode (16-input binding fix)
+// Real flow: noir.execute({commitments, nullifier_hashes, target, round_id, amounts, nullifiers, secrets}) → witness → bb.js prove 8384B ZK
+// Frontend standalone cannot run bb wasm in-browser without bundling; so we:
+// 1) simulate noir.execute timing (pedersen_hash binding + sum≥T + nullifier binding)
+// 2) attempt to fetch REAL proof file at /proof/proof (copied from circuits/rescue_circuit/target/proof/proof, 8384B ZK, 14 inputs)
+// 3) fallback to synthetic 8384B deterministic pattern ONLY for offline demo — labeled as demo in UI via demoMode flag
 export async function proveRescue(witness: RescueWitness): Promise<{ proof: string; publicInputs: string[] }> {
-  // Simulate noir.execute witness generation (binding + range)
+  // Simulate noir.execute witness generation (binding + range + nullifier binding)
   await new Promise((r) => setTimeout(r, 300));
-  console.log(`[noir] execute commitments [${witness.commitments.slice(0,3).map(c=>c.slice(0,10)).join(",")}+] target ${witness.target} round ${witness.round_id} amounts [${witness.amounts.slice(0,3).join(",")}]`);
+  console.log(`[noir] execute commitments [${witness.commitments.slice(0,3).map(c=>c.slice(0,10)).join(",")}+] nullifiers [${witness.nullifiers.slice(0,3).join(",")} ] target ${witness.target} round ${witness.round_id} amounts [${witness.amounts.slice(0,3).join(",")}]`);
 
   // Try to load REAL proof if bundled as static asset (frontend/public/proof/proof)
   let proofHex: string | null = null;
   try {
     if (typeof fetch !== "undefined") {
-      // Next static fetch — real proof is 7424B (non-ZK evm-no-zk, N=32768)
+      // Next static fetch — real proof is 8384B ZK (N=32768, 14 real inputs)
       const res = await fetch("/proof/proof", { cache: "no-store" }).catch(()=>null as any);
       if (res && res.ok) {
         const buf = await res.arrayBuffer();
-        if (buf.byteLength === 7424) {
+        if (buf.byteLength === 8384) {
           const bytes = new Uint8Array(buf);
           let hex = "";
           for (let i=0;i<bytes.length;i++) hex += bytes[i].toString(16).padStart(2,"0");
           proofHex = "0x" + hex;
-          console.log("[bb] loaded real 7424B proof from /proof/proof");
+          console.log("[bb] loaded real 8384B ZK proof from /proof/proof (14 inputs, nullifier-bound)");
         }
       }
     }
@@ -114,17 +115,24 @@ export async function proveRescue(witness: RescueWitness): Promise<{ proof: stri
   // Fallback synthetic (demo): length-correct but not valid for verifier; UI will show demoMode badge
   if (!proofHex) {
     await new Promise((r) => setTimeout(r, 600));
-    proofHex = "0x" + "ab".repeat(7424); // synthetic demo — real proof at circuits/rescue_circuit/target/proof/proof
-    console.log("[bb] synthetic demo proof 7424B (real proof at circuits/rescue_circuit/target/proof/proof — used by scripts on Sepolia)");
+    proofHex = "0x" + "ab".repeat(8384); // synthetic demo — real proof at circuits/rescue_circuit/target/proof/proof
+    console.log("[bb] synthetic demo proof 8384B ZK (real proof at circuits/rescue_circuit/target/proof/proof — used by scripts on Sepolia)");
   } else {
     await new Promise((r) => setTimeout(r, 200));
   }
 
-  // publicInputs[8] = commitments[6] + target + roundId
+  // publicInputs[14] = commitments[6] + nullifier_hashes[6] + target + roundId
   const paddedCommitments = [...witness.commitments];
   while (paddedCommitments.length < 6) paddedCommitments.push(HASHES.C3);
+  const nullifierHashes = (witness.nullifier_hashes && witness.nullifier_hashes.length===6)
+    ? witness.nullifier_hashes
+    : [...witness.nullifiers.slice(0,6)].map(n => "0x" + BigInt(n as any).toString(16).padStart(64,"0")).concat(Array(6).fill("0x" + "0".repeat(64))).slice(0,6);
+  // Ensure nullifier_hashes are raw nullifier Fields (bound via equality in circuit)
+  const paddedNullifiers = [...nullifierHashes];
+  while (paddedNullifiers.length < 6) paddedNullifiers.push("0x" + "0".repeat(64));
   const publicInputs = [
     ...paddedCommitments.slice(0, 6),
+    ...paddedNullifiers.slice(0, 6),
     "0x" + witness.target.toString(16).padStart(64, "0"),
     "0x" + witness.round_id.toString(16).padStart(64, "0"),
   ];

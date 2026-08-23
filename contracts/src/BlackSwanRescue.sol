@@ -47,9 +47,6 @@ contract BlackSwanRescue {
 
     // Record commitments for a round (called via private mempool in demo; amounts never appear)
     // Honest hardening (fix #4): gate so commitments cannot be overwritten after settle, and non-zero round.
-    // Nullifiers are NOT yet bound to proof public inputs (circuit binds nullifiers into commitments via pedersen_hash,
-    // but contract checks caller-supplied nullifiers independently — disclosed limitation, see README §5 & HACKATHON_DEMO.md §7).
-    // Future: include nullifier hashes in public inputs (16 inputs) to cryptographically bind.
     function recordCommitments(uint256 roundId, bytes32[6] calldata commitments) external {
         if (roundId == 0) revert RoundNotOpened(roundId);
         if (roundSettled[roundId]) revert AlreadySettled(roundId);
@@ -59,9 +56,10 @@ contract BlackSwanRescue {
         emit CommitmentsRecorded(roundId, commitments);
     }
 
-    // Hybrid Settle: proof + publicInputs[8] = commitments[6] + target + roundId, plus nullifiers for uniqueness check
-    // publicInputs layout per circuits/README.md:7 & src/main.nr:23-25: [commitments[6], target, round_id]
-    // nullifiers: bytes32[6] corresponding to same MAX_RESCUERS, zero = empty slot (skipped for reuse check per vault spec)
+    // Hybrid Settle: proof + publicInputs[14] = commitments[6] + nullifier_hashes[6] + target + roundId, plus nullifiers for uniqueness check
+    // publicInputs layout per src/main.nr:24-27: [commitments[6], nullifier_hashes[6], target, round_id]
+    // nullifier_hashes are cryptographically bound to private nullifiers via `assert(nullifiers[i]==nullifier_hashes[i])` in circuit
+    // Nullifiers are then checked for per-round uniqueness and for escrow routing.
     // Hybrid: if ShieldedPool escrow exists for any nullifier -> A path (real DeFi, calls vault.recap with shares + pool.releaseToVaultReal)
     //         else -> B path (simulation, hash-only pre-funded pool, vault.recap stub + releaseToVault)
     function settle(
@@ -69,9 +67,14 @@ contract BlackSwanRescue {
         bytes32[] calldata publicInputs,
         bytes32[6] calldata nullifiers
     ) external {
-        if (publicInputs.length != 8) revert InvalidPublicInputs();
-        uint256 roundId = uint256(publicInputs[7]);
-        uint256 target = uint256(publicInputs[6]);
+        if (publicInputs.length != 14) revert InvalidPublicInputs();
+        uint256 roundId = uint256(publicInputs[13]);
+        uint256 target = uint256(publicInputs[12]);
+        // Cryptographic binding: public nullifier_hashes must equal the raw nullifiers supplied for reuse tracking.
+        // Prevents shuffle/substitution where attacker proves with 11,22,33 but submits 99,99,99 to bypass nullifierUsed.
+        for (uint256 i = 0; i < 6; i++) {
+            if (publicInputs[6 + i] != nullifiers[i]) revert InvalidPublicInputs();
+        }
 
         if (roundId == 0) revert RoundNotOpened(roundId);
         if (roundSettled[roundId]) revert AlreadySettled(roundId);
@@ -153,10 +156,11 @@ contract BlackSwanRescue {
         uint256 roundId,
         bytes32[6] calldata nullifiers
     ) external {
-        bytes32[] memory inputs = new bytes32[](8);
+        bytes32[] memory inputs = new bytes32[](14);
         for (uint256 i = 0; i < 6; i++) inputs[i] = commitments[i];
-        inputs[6] = bytes32(target);
-        inputs[7] = bytes32(roundId);
+        for (uint256 i = 0; i < 6; i++) inputs[6 + i] = nullifiers[i];
+        inputs[12] = bytes32(target);
+        inputs[13] = bytes32(roundId);
         this.settle(proof, inputs, nullifiers);
     }
 

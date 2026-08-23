@@ -17,6 +17,7 @@ contract ShieldedPoolTest is Test {
 
     bytes32 constant C0 = 0x09726b28aff94a2f70169b87dc9e689359dbe0b588664b645e6606c74ebc5196;
     bytes32 constant C1 = 0x1804bcccd6d51a2c6e89c38d57280cb32cc149d16b260ac341efccb3d3ff9da7;
+    bytes32 constant C2 = 0x11d2f4a75e9382f6370873b63e1bf75d0e0b8f31b26f5e8fd0c6fa28e6de8d0a;
     bytes32 constant C3 = 0x0252191f87d94cfa16f5de62f60d4c58f0899cbb2d437e58c1ad7bb55139b3b7;
 
     function setUp() public {
@@ -41,9 +42,10 @@ contract ShieldedPoolTest is Test {
         assertTrue(pool.nullifierUsed(bytes32(uint256(11))));
         assertEq(pool.poolBalance(), 1000); // pre-funded only; deposits are hash-only, no token movement per deposit
         bytes memory proof = vm.readFileBinary("../circuits/rescue_circuit/target/proof/proof");
-        bytes32[] memory inputs = new bytes32[](8);
-        inputs[0] = C0; inputs[1] = C1; inputs[2] = 0x11d2f4a75e9382f6370873b63e1bf75d0e0b8f31b26f5e8fd0c6fa28e6de8d0a; inputs[3] = C3; inputs[4] = C3; inputs[5] = C3;
-        inputs[6] = bytes32(uint256(600)); inputs[7] = bytes32(uint256(1));
+        bytes32[] memory inputs = new bytes32[](14);
+        inputs[0] = C0; inputs[1] = C1; inputs[2] = C2; inputs[3] = C3; inputs[4] = C3; inputs[5] = C3;
+        inputs[6] = bytes32(uint256(11)); inputs[7] = bytes32(uint256(22)); inputs[8] = bytes32(uint256(33)); inputs[9] = bytes32(0); inputs[10] = bytes32(0); inputs[11] = bytes32(0);
+        inputs[12] = bytes32(uint256(600)); inputs[13] = bytes32(uint256(1));
         bytes32[6] memory nullifiers = [bytes32(uint256(11)), bytes32(uint256(22)), bytes32(uint256(33)), bytes32(0), bytes32(0), bytes32(0)];
         rescue.settle(proof, inputs, nullifiers);
         assertTrue(vault.recapped());
@@ -90,9 +92,10 @@ contract ShieldedPoolTest is Test {
         assertEq(asset.balanceOf(address(vaultReal)), 0);
 
         bytes memory proof = vm.readFileBinary("../circuits/rescue_circuit/target/proof/proof");
-        bytes32[] memory inputs = new bytes32[](8);
+        bytes32[] memory inputs = new bytes32[](14);
         inputs[0] = C0; inputs[1] = C1; inputs[2] = C2; inputs[3] = C3; inputs[4] = C3; inputs[5] = C3;
-        inputs[6] = bytes32(uint256(600)); inputs[7] = bytes32(uint256(1));
+        inputs[6] = bytes32(uint256(11)); inputs[7] = bytes32(uint256(22)); inputs[8] = bytes32(uint256(33)); inputs[9] = bytes32(0); inputs[10] = bytes32(0); inputs[11] = bytes32(0);
+        inputs[12] = bytes32(uint256(600)); inputs[13] = bytes32(uint256(1));
         bytes32[6] memory nullifiers = [bytes32(uint256(11)), bytes32(uint256(22)), bytes32(uint256(33)), bytes32(0), bytes32(0), bytes32(0)];
 
         // expect RescueShareMinted per rescuer

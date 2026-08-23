@@ -2,11 +2,11 @@
 // Uses window.ethereum if available, fallback to privateKey from .env for demo via viem privateKeyToAccount
 
 export const DEPLOY = {
-  MockERC20: "0x1076aAE7B0eA654F6592fE8FADA547A1E6aFed38" as const,
-  RecapVault: "0xc93AE9ba07819b4691e554Cd78E50B784B710666" as const,
-  RecapVerifier: "0x6b79fB1929A49b58d8Bfd0e31773e29E3Bf4FD52" as const,
-  BlackSwanRescue: "0xCb19d811cEe4657bef2128eDA51C09378E7D1A95" as const,
-  ShieldedPool: "0xeb8f0141949Cf141491faea65fbC91847dca8C35" as const,
+  MockERC20: "0x11f32fba32026454e3e320d121b47ad58a4268a3" as const,
+  RecapVault: "0x1eE4A73bb0Ed2B6bD2158A25121bb97eF4BdA805" as const,
+  RecapVerifier: "0x42071BaED561D3e11f0Affcce90520F3ea0428F1" as const,
+  BlackSwanRescue: "0x37420092F0C89E6A78882F3Ab013EE6E5bBD0CE4" as const,
+  ShieldedPool: "0xba045e6b53B2F71916dd8E83bCF6451741A7f604" as const,
 };
 
 export const EXPLORER = "https://sepolia.etherscan.io";
