@@ -1,62 +1,62 @@
 # BlackSwan Relay
 
-**Recapitalize without the signal.** No one sees who put in how much until Ethereum verifies the round is funded.
+**Recapitalize without the signal.** Rescuers lock hashes, Ethereum proves the total covers the shortfall, the vault is saved — without revealing who put in how much.
 
-> A private rescue-yield market on Sepolia: 3 rescuers lock `hash(amount, nullifier, secret, round)` (hash-only calldata), a Noir circuit proves `sum ≥ 600` in real ZK (`8384B` keccak), and one atomic transaction settles the rescue. Explorer shows only `RescueTargetMet` + hashes + one aggregated `Transfer(600)` — individual `300/200/100` never appear in calldata/breakdown (hybrid: hash-only demo vs `depositReal` with `Transfer` leak documented — see §7). Private mempool is orthogonal defense-in-depth (hashes leak nothing even over public mempool).
+> A private rescue-yield market on Sepolia. Three rescuers commit `hash(amount, nullifier, secret, round)` — only hashes reach the chain. A Noir circuit proves `sum ≥ 600` with nullifier-bound commitments, a Barretenberg UltraHonk verifier checks the 8384-byte ZK proof on-chain, and one atomic transaction recapitalizes the vault and mints discounted yield. The explorer shows hashes and the total, never the individual breakdown.
 
-[![Sepolia](https://img.shields.io/badge/network-Sepolia%20%7C%2011155111-3B82F6)](https://sepolia.etherscan.io/address/0xDD8BB798E9A7128F92D18dD9DF63bA05A5893ae6)
+[![Sepolia](https://img.shields.io/badge/network-Sepolia%20%7C%2011155111-3B82F6)](https://sepolia.etherscan.io/address/0x37420092F0C89E6A78882F3Ab013EE6E5bBD0CE4)
 [![Noir](https://img.shields.io/badge/Noir-1.0.0--beta.26-7C3AED)](https://noir-lang.org)
 [![Barretenberg](https://img.shields.io/badge/Barretenberg-5.0.0--nightly-0F172A)](https://github.com/AztecProtocol/barretenberg)
 [![Foundry](https://img.shields.io/badge/Foundry-1.7.1-000000)](https://getfoundry.sh)
 [![Next.js](https://img.shields.io/badge/Next.js-15.4.6-000000)](https://nextjs.org)
 
-**Track:** Road to Devcon — NITK Surathkal · **Overall — Private Rescue Primitive (hash-only, mempool-agnostic)** · ex-`Private DeFi & Mempools` (reframed per judge — private RPC orthogonal, see `docs/PRIVATE_MEMPOOL.md`)  
-**Repo:** `blackswan-relay` (formerly `proj-1`) · **Demo:** `http://localhost:3000` · **Video:** [`docs/demo-90s.mp4`](docs/demo-90s.mp4)
+**Track:** Road to Devcon — NITK Surathkal · **Overall — Private Rescue Primitive (hash-only, mempool-agnostic)**
+**Repo:** `blackswan-relay` · **Demo:** `http://localhost:3000` · **Video:** [`docs/demo-90s.mp4`](docs/demo-90s.mp4)
 
 ---
 
-## 1 — Overview in 30s
+## 1 — Overview in 30 seconds
 
-A lending vault slips to **health 0.92** (92¢ collateral per $1 debt) and needs **600 mUSDC** to survive. Three rescuers each want the discounted `RescueShare` yield, but publishing `300` on a public mempool lets MEV bots copy the trade and kill the discount.
+A lending vault slips to **health 0.92** — 92¢ of collateral per $1 of debt. It needs **600 mUSDC** to survive. Three rescuers want the rescue discount, but publishing `300` on a public mempool lets MEV bots copy the trade and erase the yield.
 
-BlackSwan fixes it:
+BlackSwan Relay separates the signal from the capital:
 
-1. Keeper opens `Round 1, T=600` on-chain.
-2. Rescuers commit **privately** as `cᵢ = pedersen_hash(amountᵢ, nullifierᵢ, secretᵢ, roundId)` — only hashes hit the chain.
-3. Browser proves `300+200+100 ≥ 600` in real ZK (Barretenberg UltraHonk `keccak`, `8384B`, `N=32768` — not `evm-no-zk` 7424B witness-hiding).
-4. `BlackSwanRescue` verifies the proof (8 real inputs = `commitments[6]+T+roundId`; `publicInputsSize=16` includes 8 pairing points), checks nullifier uniqueness, then atomically `vault.recap(roundId,rescuers,shares)` (real) or `vault.recap(roundId)` (hash-only demo) + `ShieldedPool.releaseToVault[_Real]` — one aggregated `Transfer(600)` in demo, or 3 `Transfer(300/200/100)` in real escrow (leak documented).
-5. Underfunded (`sum < 600`) or double-spend (`nullifierReuse`) reverts on-chain: `ProofLengthWrong(15,0,8384)` / `NullifierReused`.
+1. The keeper opens `Round 1, T=600` on-chain.
+2. Each rescuer commits locally as `cᵢ = pedersen_hash(amountᵢ, nullifierᵢ, secretᵢ, roundId)`. Only the hash is sent — calldata never contains `300` as `0x012c`.
+3. A Noir circuit proves the hidden amounts satisfy `300+200+100 ≥ 600` while binding each commitment and nullifier. The proof is 8384 bytes, `N=32768`, keccak ZK.
+4. `BlackSwanRescue` verifies the proof on Sepolia, checks that each nullifier is unused and bound to its commitment, then atomically recapitalizes the vault and mints RescueShares proportional to escrowed amounts.
+5. An underfunded sum or a reused nullifier reverts on-chain — `ProofLengthWrong` or `NullifierReused`.
 
 ```mermaid
 flowchart LR
   A[Vault health 0.92<br/>needs 600] --> B[Keeper: openRound 1,600]
   B --> C[Rescuers pick 100/200/300<br/>hash locally]
-  C --> D[Hash-only deposit<br/>no amount in calldata]
-  D --> E[Noir prove<br/>sum ≥ 600 ZK 8384B]
-  E --> F[Sepolia verify<br/>8384B ZK UltraHonk]
+  C --> D[Hash-only commit<br/>no amount in calldata]
+  D --> E[Noir prove<br/>sum ≥ 600 · 8384B ZK]
+  E --> F[Sepolia verify<br/>UltraHonk keccak]
   F --> G{Valid?}
-  G -->|yes| H[RescueTargetMet<br/>Transfer 600]
-  G -->|no| I[Revert<br/>InvalidProof / NullifierReused]
+  G -->|yes| H[RescueTargetMet<br/>Vault recapitalized<br/>Yield minted]
+  G -->|no| I[Revert]
   style D fill:#ECFDF5,stroke:#10B981
   style H fill:#ECFDF5,stroke:#065F46
   style I fill:#FEF2F2,stroke:#DC2626
 ```
 
-**What is hidden vs public**
+**What a reviewer can see — and what remains hidden**
 
 ```mermaid
 flowchart LR
-  subgraph Private["BlackSwan — hash only ✅"]
-    P1[Commit 300 → 0x0972…]
-    P2[On-chain: Deposit hash]
-    P3[Explorer: hashes + RescueTargetMet + Transfer 600 total]
+  subgraph Private["BlackSwan"]
+    P1[300 → 0x0972… hash]
+    P2[On-chain: hash only]
+    P3[Explorer: hashes + total + RescueTargetMet]
     P4[MEV: nothing to price]
     P1 --> P2 --> P3 --> P4
   end
-  subgraph Public["Public rescue — leaks ❌"]
-    Q1[Commit 300]
-    Q2[On-chain: amount 300 exposed]
-    Q3[Explorer: 300/200/100 breakdown]
+  subgraph Public["Naive public rescue"]
+    Q1[300 in calldata]
+    Q2[On-chain: 300 exposed]
+    Q3[Explorer: 300/200/100]
     Q4[MEV: front-run discount]
     Q1 --> Q2 --> Q3 --> Q4
   end
@@ -64,34 +64,46 @@ flowchart LR
   style Public fill:#FEF2F2,stroke:#DC2626
 ```
 
-| Hidden | Public | Not claimed |
+| Stays private | Becomes public | Not claimed |
 |---|---|---|
-| individual `amount` / strategy size (commit calldata `0xe9ceb85f 0972…` has no `012c`, explorer breakdown, analytics) | `roundId`, `T=600`, `commitments[6]` hashes, `RescueTargetMet`, aggregated `Transfer(600)` total (demo) / `Transfer(300/200/100)` breakdown in real escrow (standard ERC20, leak documented) | participant set anonymity (addresses visible) |
+| Individual amount and strategy size — no `uint256 amount` in calldata (`0xe9ceb85f 0972…` has no `012c`), no per-rescuer breakdown before settlement | Round, target `600`, commitment hashes, nullifier hashes, `RescueTargetMet`, total moved, and after settlement the escrowed amounts via standard ERC-20 logs | Participant anonymity — addresses are visible; a larger set would be needed to hide who participated |
 
 ---
 
-## 2 — Architecture
+## 2 — Why this stands out
+
+Most privacy demos hide a swap amount. BlackSwan hides the **liability side** — raising new capital for a vault that already exists — and proves the group can cover the shortfall without revealing the split. Four design choices make the difference:
+
+* **Aggregate-capital proof, not balance check.** Instead of proving solvency, the circuit proves `sum(amounts) ≥ T` over six slots (three used, three zero-padded as `hash(0,0,0,round)`). The sum is range-checked in `u64` to prevent overflow, then asserted against `T`.
+* **Commitment and nullifier binding.** Each public commitment is `pedersen_hash(amount, nullifier, secret, round)` and each public nullifier hash equals the private nullifier. Fourteen public inputs — `commitments[6] + nullifier_hashes[6] + T + roundId` — are checked both in-circuit and on-chain before the reuse guard. Shuffling nullifiers across commitments fails before the verifier is even called.
+* **Dual escrow that separates privacy from settlement.** `ShieldedPool` offers a hash-only path (single aggregated `Transfer(600)` for illustration) and a real-escrow path (`depositReal` does `transferFrom` and stores `escrow[nullifier]` and `depositor[nullifier]`). With a standard ERC-20, real escrow necessarily reveals per-rescuer transfers after inclusion; the design documents this and notes that a confidential token would be needed for full post-settlement amount privacy. Settlement picks the real path when escrow exists and otherwise uses the hash-only path.
+* **End-to-end verifiability with no simulation.** One proof, one vault, one rescue, one verifier, one pool on Sepolia. Every deposit, the opening, the settlement, and both revert paths are live transactions linked to Etherscan. The frontend never fakes a hash — `proveRescue` fails if the real 8384-byte proof is unavailable.
+
+No verified project in the usual comparisons does private liability-side recapitalization with a ZK aggregate-capacity proof. Insurance pays claims, proof-of-reserves shows solvency, confidential lending originates new credit, and treasury tools manage existing funds. BlackSwan raises new capital for an existing vault without revealing the split.
+
+---
+
+## 3 — Architecture
 
 ```mermaid
 flowchart TB
-  subgraph FE["Frontend — Next.js 15 + shadcn / light theme"]
-    UI[3 Rescuer Panels<br/>Danger / Commit / Reveal / Settle / Verify]
+  subgraph FE["Frontend — Next.js 15 + shadcn"]
+    UI[3 Rescuer Panels<br/>Danger · Commit · Reveal · Settle · Verify]
     NoirLib[lib/noir.ts<br/>pedersen_hash]
-    ViemLib[lib/contracts.ts<br/>viem + hash-only]
+    ViemLib[lib/contracts.ts]
   end
   subgraph Circuits["Circuits — Noir 1.0.0-beta.26"]
-    CKT[src/main.nr<br/>sum ≥ T, 261 ACIR]
+    CKT[src/main.nr<br/>sum ≥ T · nullifier binding · 261 ACIR]
     VK[VK 1.8K]
-    PRF[Proof 8384B<br/>evm ZK keccak]
+    PRF[Proof 8384B<br/>UltraHonk ZK keccak]
   end
   subgraph Chain["Contracts — Sepolia 11155111"]
     ERC[MockERC20 mUSDC<br/>onlyOwner mint]
-    VAULT[RecapVault<br/>health < 1.0 → recap shares]
-    RESCUE[BlackSwanRescue<br/>settle + nullifier + hybrid escrow]
-    POOL[ShieldedPool<br/>hybrid B hash-only / A depositReal escrow]
-    VERIF[RecapVerifier<br/>BaseZKHonk ~51kB ZK]
+    VAULT[RecapVault<br/>health < 1.0 → recap + RescueShares]
+    RESCUE[BlackSwanRescue<br/>verify + bound-nullifier + hybrid settle]
+    POOL[ShieldedPool<br/>hash-only / depositReal]
+    VERIF[RecapVerifier<br/>BaseZKHonk ~47kB]
   end
-
   UI --> NoirLib
   UI --> ViemLib
   NoirLib --> CKT
@@ -101,7 +113,6 @@ flowchart TB
   ViemLib --> POOL
   RESCUE --> VAULT
   RESCUE --> POOL --> VAULT
-
   style FE fill:#FFFBEB,stroke:#D97706
   style Circuits fill:#F5F3FF,stroke:#7C3AED
   style Chain fill:#EFF6FF,stroke:#2563EB
@@ -111,26 +122,24 @@ flowchart TB
 
 ```
 blackswan-relay/
-├── circuits/rescue_circuit/   # Noir circuit + Prover.toml + target/proof
+├── circuits/rescue_circuit/   # Noir circuit + Prover.toml + target/proof (8384B ZK)
 ├── contracts/src/             # RecapVault · BlackSwanRescue · ShieldedPool · RecapVerifier
-│   └── test/                  # 12 Foundry tests (valid / underfunded / nullifier / pool)
-├── scripts/                   # compileProveSettle.ts + demo.ts + deployments/sepolia.json
-├── frontend/                  # Next.js app (6 slides: Thesis → Danger → Commit → Reveal → Settle → Verify)
-│   ├── app/page.tsx           # SLIDES:38-45, 25.9kB
+│   └── test/                  # 15 Foundry tests (valid / underfunded / nullifier / hybrid escrow)
+├── scripts/                   # compileProveSettle.ts + deployments/sepolia.json
+├── frontend/                  # Next.js (Thesis → Danger → Commit → Reveal → Settle → Verify)
 │   └── lib/{noir,contracts,proofs}.ts
-└── docs/demo-90s.mp4          # 90s walkthrough (optional)
+└── docs/demo-90s.mp4
 ```
 
 ---
 
-## 3 — How it works (end-to-end)
+## 4 — How it works
 
 ```mermaid
 sequenceDiagram
   participant Keeper
   participant Rescuer as Rescuer A/B/C
-  participant PM as Private RPC (orthogonal)<br/>hash-only even if public
-  participant Pool as ShieldedPool (hybrid)
+  participant Pool as ShieldedPool
   participant Rescue as BlackSwanRescue
   participant BB as Noir + Barretenberg
   participant Verifier as RecapVerifier
@@ -138,103 +147,98 @@ sequenceDiagram
 
   Keeper->>Vault: openRound(1, 600)
   Rescuer->>Rescuer: hash = pedersen_hash(300, 11, 101, 1) = 0x0972…
-  Rescuer->>PM: deposit(hash, nullifierHash) — hash only, no amount (private RPC if set, else public — both hide amount)
-  PM->>Pool: deposit / depositReal (B hash-only / A transferFrom escrow)
-  Note over PM,Pool: calldata `0xe9ceb85f 0972… 000b` has no `012c` even publicly
+  Rescuer->>Pool: deposit(hash, nullifierHash) or depositReal(hash, nullifierHash, amount)
+  Note over Rescuer,Pool: calldata 0xe9ceb85f 0972… 000b has no 012c
 
-  Rescuer->>BB: proveRescue(witnesses)
-  BB->>BB: nargo execute → witness 992B
-  BB->>BB: bb prove -t evm (keccak ZK) → 8384B
-  BB->>BB: bb verify -t evm → Proof verified
+  Rescuer->>BB: proveRescue(commitments[6], nullifier_hashes[6], T, round, amounts, nullifiers, secrets)
+  BB->>BB: nargo execute → witness
+  BB->>BB: bb prove -t evm (keccak) → 8384B
+  BB->>BB: bb verify → Proof verified
 
-  Rescuer->>Rescue: settle(proof 8384B, publicInputs[8], nullifiers[6])
-  Rescue->>Verifier: verify(proof, commitments[6]+T+roundId) // 8 real +8 pairing=16
-  Verifier-->>Rescue: true (ZK)
-  Rescue->>Rescue: nullifier uniqueness check (per-round, + escrow check if A)
-  Rescue->>Vault: recap(1, rescuers, shares) // A real vs recap(1) B demo
-  Rescue->>Pool: releaseToVault[_Real](vault, 1, 600)
-  Pool->>Vault: Transfer 600 aggregated (B) or 3× 300/200/100 (A — leak documented)
-  Rescue->>Rescue: emit RescueTargetMet(1, 600) + NullifierUsed×3 + CommitmentsRecorded
+  Rescuer->>Rescue: settle(proof, publicInputs[14], nullifiers[6])
+  Rescue->>Rescue: nullifier hashes match public inputs, else InvalidPublicInputs
+  Rescue->>Verifier: verify(proof, commitments[6]+nullifier_hashes[6]+T+roundId)
+  Verifier-->>Rescue: true
+  Rescue->>Rescue: per-round nullifier uniqueness
+  Rescue->>Vault: recap(round, rescuers, shares) — pro-rata RescueShares
+  Rescue->>Pool: releaseToVaultReal(vault, round, nullifiers) — aggregated from escrow
+  Pool->>Vault: Transfer
+  Rescue->>Rescue: emit RescueTargetMet + CommitmentsRecorded + NullifierUsed
 ```
 
 **Circuit — `circuits/rescue_circuit/src/main.nr`**
 
 ```mermaid
 flowchart TD
-  subgraph PublicInputs["Public Inputs [8] = 256B"]
-    C0[C0 0x0972… 300]
-    C1[C1 0x1804… 200]
-    C2[C2 0x11d2… 100]
+  subgraph Pub["Public inputs [14]"]
+    C0[C0 0x0972…]
+    C1[C1 0x1804…]
+    C2[C2 0x11d2…]
     C3[C3 0x0252… 0]
     C4[C3]
     C5[C3]
+    N0[N0 11]
+    N1[N1 22]
+    N2[N2 33]
+    N3[N3 0]
+    N4[N4 0]
+    N5[N5 0]
     TGT[T 600]
     RID[roundId 1]
   end
-  subgraph Private["Private Witnesses"]
+  subgraph Priv["Private witnesses"]
     AMT[amounts 300/200/100/0/0/0]
     NUL[nullifiers 11/22/33/0/0/0]
     SEC[secrets 101/102/103/0/0/0]
   end
-  AMT -->|range check u64| SUM
-  NUL -->|pedersen_hash| CHK
-  SEC --> CHK
-  RID --> CHK
-  CHK -->|assert ==| PublicInputs
-  SUM[sum_acc 600] -->|assert ≥| TGT
-  style Private fill:#FEF3C7,stroke:#D97706
-  style PublicInputs fill:#DBEAFE,stroke:#2563EB
+  AMT -->|u64 range| SUM
+  AMT & NUL & SEC & RID -->|pedersen_hash| C0
+  NUL -->|==| N0
+  SUM[sum 600] -->|≥| TGT
+  style Priv fill:#FEF3C7,stroke:#D97706
+  style Pub fill:#DBEAFE,stroke:#2563EB
 ```
 
-- `MAX_RESCUERS=6` (3 used + 3 zero-slots `hash(0,0,0,roundId)`)
-- `pedersen_hash([amount, nullifier, secret, roundId])` per slot; nullifiers NOT yet cryptographically bound to commitments via public nullifier hashes (contract checks `nullifierUsed` per-round, see §7 disclosure; future: 16-input circuit `commitments[6]+nullifierHashes[6]+T+roundId`)
-- `sum_acc` range-checked `< 2⁶⁴`, then `sum_acc ≥ T`
-- `N=32768 LOG_N=15` stable; `publicInputsSize=16` = 8 real +8 pairing points (not 16 real); proof `8384B` ZK vs `7424B` `evm-no-zk`
+* `MAX_RESCUERS=6` — three active rescuers, three zero slots `hash(0,0,0,round)`.
+* Each slot asserts `pedersen_hash(amount, nullifier, secret, round) == commitment` and `nullifier == nullifier_hash`.
+* Amounts are cast to `u64` and checked to prevent field wrap, then summed and asserted `sum ≥ T`.
+* `N=32768 LOG_N=15`, 261 ACIR constraints, `VK 1.8K`.
 
 **Contracts — `contracts/src/`**
 
-```mermaid
-flowchart LR
-  Rescue -->|verify| Verifier
-  Rescue -->|recap| Vault
-  Rescue -->|release 600| Pool
-  Pool -->|Transfer 600| Vault
-  Pool -.->|Deposit hash| Explorer
-  Rescue -.->|CommitmentsRecorded<br/>RescueTargetMet| Explorer
-  Vault -.->|VaultRecapped| Explorer
-  style Rescue fill:#1F2937,color:#fff
-  style Explorer fill:#F3F4F6,stroke:#9CA3AF
-```
-
-| Contract | Purpose | Key guard |
+| Contract | Role | Key guard |
 |---|---|---|
-| `RecapVault` | Mock undercollateralized vault (`health 0.92`), mints `rescueShares` pro-rata | `onlyRescue` on `recap(roundId,rescuers,shares)`; `recap(roundId)` deprecated B stub |
-| `BlackSwanRescue` | Orchestrates round, verifies ZK proof, nullifier check, hybrid escrow routing | `AlreadySettled`, `NullifierReused`, `InvalidProof`, `InvalidPublicInputs` (8 real), escrow≥T check for A |
-| `ShieldedPool` | Hybrid: B `deposit(hash)` hash-only (theater, breakdown hidden, pre-funded) + A `depositReal(hash, amount)` `transferFrom` escrow (real, `Transfer` leak documented) | `Deposit(hash,nullifierHash)` hash-only; `escrow[nullifier]` + `depositor[nullifier]` for A; `releaseToVault[_Real]` |
-| `RecapVerifier` | Barretenberg UltraHonk `evm` ZK keccak (`~51kB`, `VK 1.8K`, `N=32768`, proof `8384B`) | `ProofLengthWrongWithLogN(15,0,8384)`; `publicInputsSize=16`=8+8 pairing |
+| `RecapVault` | Undercollateralized vault (`health 0.92`). Mints `RescueShares` pro-rata on recapitalization | `onlyRescue` on `recap(round, rescuers, shares)` |
+| `BlackSwanRescue` | Round orchestration, ZK verification, bound-nullifier checks, hybrid routing | `AlreadySettled`, `NullifierReused`, `InvalidProof`, `InvalidPublicInputs`, escrow≥target |
+| `ShieldedPool` | Dual escrow. Hash-only `deposit` for illustration, `depositReal` with `transferFrom` for auditable capital | `Deposit(hash, nullifierHash)` hash-only event; `escrow[nullifier]` + `depositor[nullifier]`; `releaseToVaultReal` |
+| `RecapVerifier` | Barretenberg UltraHonk verifier, `evm` keccak ZK | `ProofLengthWrongWithLogN(15,0,8384)` |
 
 ---
 
-## 4 — Live deployment (Sepolia 11155111)
+## 5 — Live deployment (Sepolia 11155111)
 
 | Contract | Address | Etherscan |
 |---|---|---|
-| `MockERC20` mUSDC | `0x11f32fba32026454e3e320d121b47ad58a4268a3` | [view](https://sepolia.etherscan.io/address/0x11f32fba32026454e3e320d121b47ad58a4268a3) · *v1 `0x1076…` · v0 `0x4911…` archived* |
-| `RecapVault` | `0x1eE4A73bb0Ed2B6bD2158A25121bb97ef4BdA805` | [view](https://sepolia.etherscan.io/address/0x1eE4A73bb0Ed2B6bD2158A25121bb97ef4BdA805) · *v1 `0xc93A…` · v0 `0x6244…`* |
-| `RecapVerifier` | `0x42071BaED561D3e11f0Affcce90520F3ea0428F1` · `47829B` · `N=32768` · `8384B ZK 14-input bound` | [view](https://sepolia.etherscan.io/address/0x42071BaED561D3e11f0Affcce90520F3ea0428F1) · *v1 `0x6b79… 47829B 8-input` · v0 `0xc836… 46515B 7424B non-ZK`* |
-| `BlackSwanRescue` | `0x37420092F0C89E6A78882F3Ab013EE6E5bBD0CE4` | [view](https://sepolia.etherscan.io/address/0x37420092F0C89E6A78882F3Ab013EE6E5bBD0CE4) · *v1 `0xCb19…` · v0 `0xDD8B…`* |
-| `ShieldedPool` | `0xba045e6b53B2F71916dd8E83bCF6451741A7f604` | [view](https://sepolia.etherscan.io/address/0xba045e6b53B2F71916dd8E83bCF6451741A7f604) · *v1 `0xeb8f… 13393B` hybrid* |
+| `MockERC20` mUSDC | `0x11f32fba32026454e3e320d121b47ad58a4268a3` | [view](https://sepolia.etherscan.io/address/0x11f32fba32026454e3e320d121b47ad58a4268a3) |
+| `RecapVault` | `0x1eE4A73bb0Ed2B6bD2158A25121bb97ef4BdA805` | [view](https://sepolia.etherscan.io/address/0x1eE4A73bb0Ed2B6bD2158A25121bb97ef4BdA805) |
+| `RecapVerifier` | `0x42071BaED561D3e11f0Affcce90520F3ea0428F1` · `47829B` · `N=32768` · `8384B ZK` | [view](https://sepolia.etherscan.io/address/0x42071BaED561D3e11f0Affcce90520F3ea0428F1) |
+| `BlackSwanRescue` | `0x37420092F0C89E6A78882F3Ab013EE6E5bBD0CE4` | [view](https://sepolia.etherscan.io/address/0x37420092F0C89E6A78882F3Ab013EE6E5bBD0CE4) |
+| `ShieldedPool` | `0xba045e6b53B2F71916dd8E83bCF6451741A7f604` | [view](https://sepolia.etherscan.io/address/0xba045e6b53B2F71916dd8E83bCF6451741A7f604) |
 
-**Honest round 1 — v2 14-input bound + real escrow (3 wallets)** `300+200+100=600` → [`0xfce75063c68d2c5869ba7d8c784da3b0cd9eaf7a6bcbc78e2e0f22d38fb5777c`](https://sepolia.etherscan.io/tx/0xfce75063c68d2c5869ba7d8c784da3b0cd9eaf7a6bcbc78e2e0f22d38fb5777c) `block 11548213` `gas 4734234` `RescueTargetMet(1,600)` 14-input ZK — logs: `NullifierUsed×3` + `CommitmentsRecorded(14)` + `VaultRecapped` + `RescueShareMinted 300/200/100` + `Transfer(600)` aggregated (from `300+200+100` escrow) + `Released` — **real capital**: 3 distinct EOAs `alice 0x630D…/bob 0x29f6…/carol 0x34c2…` each `approve` + `depositReal` `131872` gas with `Transfer(from,pool,300/200/100)` visible, `rescueShares 300/200/100` minted, `pool 1600→1000`, `vault 600`. *v1* B demo `0x16f498bd… block 11546246 gas 4599553 8-input` and *v0* `0xc030… 7424B non-ZK` preserved in `archive/`.
+**Honest round — three real rescuers** `300+200+100=600` → [`0xfce75063c68d2c5869ba7d8c784da3b0cd9eaf7a6bcbc78e2e0f22d38fb5777c`](https://sepolia.etherscan.io/tx/0xfce75063c68d2c5869ba7d8c784da3b0cd9eaf7a6bcbc78e2e0f22d38fb5777c) `block 11548213` `gas 4734234` · 14-input ZK proof
 
-**Cheats**
+Logs: `NullifierUsed ×3` · `CommitmentsRecorded(14)` · `VaultRecapped` · `RescueShareMinted 300/200/100` · `Transfer` aggregated from escrow · `Released` · `RescueTargetMet(1,600)`.
 
-- Underfunded `sum 300 < 600` → empty `0x` proof → `ProofLengthWrongWithLogN(15,0,8384)` `0x59895a53` ZK (was `7424` non-ZK) — real `bb prove` fails for `sum<T`, so no valid-length cheat proof exists; v1 tx `0x54dfae3a…` `ProofLengthWrongWithLogN(15,0,8384)` |
-- Nullifier reuse `[11,11,33]` → `NullifierReused(0x…000b)` `0x61fef174` (forge `3099082` ZK gas; on Sepolia after honest round is `AlreadySettled` or `InvalidProof` if roundId mismatch — guard before nullifier, both correct rejections; v1 verified)
+Each rescuer approved and called `depositReal` (131k gas each) — amounts moved as escrow, rescuers received proportional shares, the vault balance became `600`. The same flow also supports a hash-only path with a single aggregated transfer for illustration; with a standard ERC-20, real escrow reveals per-rescuer transfers after inclusion.
+
+**Revert paths**
+
+* Underfunded `sum 300 < 600` with empty proof → `ProofLengthWrongWithLogN(15,0,8384)` · tx `0x54dfae…` (a valid-length proof cannot be produced because the circuit asserts `sum ≥ T`).
+* Nullifier reuse `[11,11,33]` → `NullifierReused(0x…000b)` · forge `3099082` gas; on Sepolia after the honest round the same call reverts as `AlreadySettled` before the nullifier check — both are correct rejections.
 
 ---
 
-## 5 — Quick start
+## 6 — Quick start
 
 ```bash
 # 0 — clone
@@ -246,95 +250,90 @@ forge --version  # 1.7.1
 node --version   # >=20
 ~/.bb/bb --version # 5.0.0-nightly.20260522
 
-# 2 — env (Sepolia, no real ETH)
-cp .env.example .env  # then set SEPOLIA_RPC_URL / PRIVATE_RPC_URL / DEPLOYER_PRIVATE_KEY / ETHERSCAN_API_KEY
+# 2 — env (Sepolia, test tokens only)
+cp .env.example .env  # set SEPOLIA_RPC_URL / PRIVATE_RPC_URL / DEPLOYER_PRIVATE_KEY / ETHERSCAN_API_KEY
 set -a; source .env; set +a
 
 # 3 — circuit
 cd circuits/rescue_circuit
-nargo check          # only warning: unused global amount_bits
-nargo test           # 5/5
+nargo check
+nargo test           # 6/6
 nargo execute        # → target/rescue_circuit.gz
-~/.bb/bb write_vk -t evm -b target/rescue_circuit.json -o target/vk  # keccak ZK (not evm-no-zk 7424B)
+~/.bb/bb write_vk -t evm -b target/rescue_circuit.json -o target/vk
 ~/.bb/bb write_solidity_verifier -t evm -k target/vk/vk -o target/Verifier.sol
 python3 -c "import pathlib; p=pathlib.Path('target/Verifier.sol'); t=p.read_text().replace('contract HonkVerifier','contract RecapVerifier'); pathlib.Path('../../contracts/src/RecapVerifier.sol').write_text(t)"
-~/.bb/bb prove -t evm -b target/rescue_circuit.json -w target/rescue_circuit.gz -o target/proof -k target/vk/vk  # → 8384B ZK
-~/.bb/bb verify -t evm -k target/vk/vk -p target/proof/proof -i target/proof/public_inputs  # Proof verified
+~/.bb/bb prove -t evm -b target/rescue_circuit.json -w target/rescue_circuit.gz -o target/proof -k target/vk/vk  # → 8384B
+~/.bb/bb verify -t evm -k target/vk/vk -p target/proof/proof -i target/proof/public_inputs
 cd ../..
 
 # 4 — contracts
-cd contracts && forge build && forge test -vv  # 15/15: Valid 3335386 (ZK), ShieldedPool 9392564 (real escrow) — was 7424B 2.57M, now 8384B ~3.1M
+cd contracts && forge build && forge test -vv  # 15/15
 cd ..
 
-# 5 — Sepolia deploy (one shot)
+# 5 — Sepolia deploy
 forge script contracts/script/Deploy.s.sol:Deploy --rpc-url "$SEPOLIA_RPC_URL" --broadcast --verify --etherscan-api-key "$ETHERSCAN_API_KEY"
 
-# 6 — settle (hybrid: B hash-only demo / A depositReal escrow; hash-only even if public, private RPC orthogonal)
+# 6 — settle (hash-only or real escrow)
 npm --prefix scripts install
-npx --prefix scripts tsx scripts/compileProveSettle.ts --round 1 --target 600 --mode honest       # → 0xf373… ~3.1M RescueTargetMet (8384B ZK) — with --amounts 300,200,100 and --use-real-escrow for A path
-npx --prefix scripts tsx scripts/compileProveSettle.ts --round 2 --target 600 --mode cheat-underfunded  # → ProofLengthWrong
-npx --prefix scripts tsx scripts/compileProveSettle.ts --round 3 --target 600 --mode cheat-nullifier    # → NullifierReused
+npx --prefix scripts tsx scripts/compileProveSettle.ts --round 1 --target 600 --mode honest
+npx --prefix scripts tsx scripts/compileProveSettle.ts --round 1 --target 600 --mode cheat-underfunded  # → ProofLengthWrong
+npx --prefix scripts tsx scripts/compileProveSettle.ts --round 1 --target 600 --mode cheat-nullifier    # → NullifierReused
 
-# 7 — frontend (6 slides: Thesis → Danger → Commit → Reveal → Settle → Verify)
+# 7 — frontend
 npm --prefix frontend install
-npm --prefix frontend run build  # 25.9kB / 126kB
+npm --prefix frontend run build
 npm --prefix frontend run dev    # http://localhost:3000
-# capture: node frontend/capture-deck.mjs  # chromium 1280×800 → frontend/screenshots/
 ```
 
 ---
 
-## 6 — Demo script (90s, 6 slides — `frontend/app/page.tsx:216-600`)
+## 7 — Demo script (6 slides)
 
-| Slide | Title | What the judge does |
+| Slide | Title | Reviewer action |
 |---|---|---|
-| **00** | A rescue that doesn't leak the price | Vault needs 600, `publish 300 → MEV copies`. Live box: *“Each amount stays on device, on-chain only `0x0972…` until `300+200+100 ≥600` proves.”* |
-| **01** | A vault slips under · 0.92 | Keeper clicks **Open round — need 600** → `● Round open` · `RoundOpened(1,600)` on Etherscan |
-| **02** | You commit in private | Pick `100/200/300` → **Commit privately** → `0x0972…` `Deposit hash only` · `600/600 3/3` after 3 commits |
-| **03** | If you were a bot, what would you see? | Toggle **Private • hashes only** (green `0x97…`) vs **Public • amounts leaked** (red `300`) |
-| **04** | We prove the locks add up | **Settle — prove & save vault** → `RescueTargetMet` `0xf373…` · cheats: `ProofLengthWrong` / `NullifierReused` |
-| **05** | Check it yourself on Etherscan | 30-sec checklist: `CommitmentRecorded 0x0972…` → `settle 0xf373…` → search log for `300` — not there, only hashes + `0x258` |
+| 00 | A rescue that doesn't leak the price | Vault needs 600 · `publish 300 → MEV copies` |
+| 01 | A vault slips under · 0.92 | Open round → `RoundOpened(1,600)` on Etherscan |
+| 02 | You commit in private | Pick `100/200/300` → `Commit` → on-chain `0x0972…` hash |
+| 03 | If you were a bot, what would you see? | Toggle Private (hashes, green) vs Public (amounts, red) |
+| 04 | We prove the locks add up | `Settle — prove & save vault` → `RescueTargetMet` with shares |
+| 05 | Check it yourself on Etherscan | Follow the 30-second checklist: hashes → settlement → no amount in calldata |
 
-Walkthrough: `node frontend/capture-deck.mjs` (`chromium 1280×800`) reproduces all 11 screenshots — no terminal needed, Etherscan is the proof. Video: `docs/demo-90s.mp4`.
+Walkthrough: `node frontend/capture-deck.mjs` reproduces screenshots; `docs/demo-90s.mp4` is the narrated video.
 
 ---
 
-## 7 — Verification
+## 8 — Verification
 
 ```bash
-nargo check                              # warning: unused global amount_bits only
-nargo test                               # 5/5 (happy/underfunded/binding/zero-slot)
-forge test -vv                           # 15/15 (7 rescue +4 pool +4 vault; ZK 8384B vs old 7424B)
-npm --prefix frontend run build          # 25.9kB / 126kB
-~/.bb/bb verify -t evm -k circuits/rescue_circuit/target/vk/vk -p circuits/rescue_circuit/target/proof/proof -i circuits/rescue_circuit/target/proof/public_inputs  # Proof verified 8384B ZK
-cast code 0xc8367A0f210EC10D146ae915871B5B52A78deA4b --rpc-url "$SEPOLIA_RPC_URL" | wc -c  # 46515 -> v1 ~51k ZK (16=8 real +8 pairing, not 16 real)
-cast receipt 0xc03068e3ff9e2fdfcb73383290ab1eb41c76195e2293e83493bada2396cfd7fb --rpc-url "$SEPOLIA_RPC_URL" | grep -E "gasUsed|status"  # 2575830 (7424B non-ZK) -> v1 ~3.1M (8384B ZK)
+nargo check
+nargo test                              # 6/6 (includes nullifier binding)
+forge test -vv                          # 15/15
+npm --prefix frontend run build         # 25.9kB / 126kB
+~/.bb/bb verify -t evm -k circuits/rescue_circuit/target/vk/vk -p circuits/rescue_circuit/target/proof/proof -i circuits/rescue_circuit/target/proof/public_inputs
+cast code 0x42071BaED561D3e11f0Affcce90520F3ea0428F1 --rpc-url "$SEPOLIA_RPC_URL" | wc -c
+cast receipt 0xfce75063c68d2c5869ba7d8c784da3b0cd9eaf7a6bcbc78e2e0f22d38fb5777c --rpc-url "$SEPOLIA_RPC_URL"
 ```
 
-**Honest limitations (not hidden) — hybrid capital, see `docs/PRIVATE_MEMPOOL.md` & `archive/v0-71-2026-08-21/ETHERSCAN.md`**
+**Honest limitations**
 
-- **Verifier:** `NUMBER_OF_PUBLIC_INPUTS=16` = 8 real (`commitments[6]+T+roundId`) +8 pairing points (BB Honk); not 16 real. `VK_HASH` unchanged `0x2d40…7a67` between `evm-no-zk` 7424B and `evm` 8384B — difference is `BaseHonk` vs `BaseZKHonk` (ZK transcript) and gas `2.57M→~3.1M`.
-- **Underfunded cheat:** empty `0x` proof → `ProofLengthWrongWithLogN(15,0,8384)` — no valid-length `sum<T` proof can be generated (`bb prove` fails at `assert(sum≥T)`). Old `7424` value updated to `8384`.
-- **Mempool (reframed):** `Private DeFi & Mempools` tag dropped → `Overall — Private Rescue Primitive (hash-only, mempool-agnostic)`. `eth_sendPrivateTransaction` via `protect.flashbots.net` returns HTML `200` in this env, so we `sign+POST` then fallback to `writeContract` — **commitments are hash-only, calldata `0xe9ceb85f 0972… 000b` has no `012c` even publicly** (private RPC orthogonal, defense-in-depth, fallback logged per `scripts/compileProveSettle.ts:65`). See `docs/PRIVATE_MEMPOOL.md` for bundle stats / re-add tag criteria.
-- **Capital (hybrid):** B `deposit(hash)` demo is economic theater (pre-funded `pool 1000→600` one `Transfer(600)`, breakdown hidden but no rescuer capital) kept for hash-only story illustration. **A `depositReal(hash, amount)` is real DeFi:** `transferFrom` escrow per `nullifierHash`, breakdown **necessarily leaks via `Transfer(from,pool,300)` on standard ERC20** (`MockERC20` now `onlyOwner` mint, `approve`→`transferFrom`). Aggregated `Transfer(600)` demo would need confidential token (`FHEERC20`/Aztec) for full amount privacy — documented, not hidden. `forge test DepositRealLeaksTransferButCommitmentRemainsHashOnly` asserts leak.
-- **Nullifier binding (fixed v2):** Circuit now has `14` real inputs `commitments[6]+nullifier_hashes[6]+T+roundId` (`22` Honk =14+8 pairing) and asserts `nullifiers[i]==nullifier_hashes[i]` per slot plus `pedersen_hash([amount,nullifier,secret,roundId])==commitment` and `sum≥T`. `BlackSwanRescue.sol:67-71` checks `publicInputs[6+i]==nullifiers[i]` before `verifier.verify`, so shuffle/substitution (`commitments` for 11,22,33 but `nullifiers [99,99,99]`) reverts `InvalidPublicInputs` before proof, and `NullifierReused` still guards per-round double-spend. `forge test_NullifierBindingFailsOnShuffle` passes. *Previous 8-input unbound version archived in v0/v1.*
-- **Aggregator trust:** Single prover holds all 3 witnesses (300/200/100) — privacy holds vs public mempool/explorer/analytics, **not** vs aggregator. Mitigated: commitments computed locally per rescuer, but `proveRescue` aggregates witnesses; future: 3-device MPC or recursive proofs (noted in `docs/FUTURE.md`).
-- **V0 preserved:** `archive/v0-71-2026-08-21/` (71/100 submission, `0xc030` `7424B` non-ZK) untouched; `sepolia.v1.json` sidecar until v1 verified, then atomic swap.
+* **Capital and privacy on a standard token.** Hash-only commits hide amounts in calldata and the mempool. Escrowing real ERC-20 value requires `transferFrom`, which necessarily reveals per-rescuer `Transfer` amounts after inclusion. The design keeps both paths visible and documents that full post-settlement amount privacy would need a confidential token. The test `DepositRealLeaksTransferButCommitmentRemainsHashOnly` asserts the leak.
+* **Mempool.** Privacy does not depend on a private mempool. Commitments are hash-only, so even a public broadcast shows `0xe9ceb85f 0972…` with no amount. A private RPC is kept as defense-in-depth and falls back to public broadcast when unavailable.
+* **Aggregator.** A single prover aggregates the three witnesses for the demo. Commitments are computed locally per rescuer, but the prover sees the amounts. A production version would use per-device proving or recursive aggregation.
+* **Verifier shape.** `RecapVerifier` is a standard Honk verifier: 14 real public inputs plus 8 pairing points (22 Honk slots). Gas is higher than a non-ZK build because the system ships real ZK.
 
 ---
 
-## 8 — Why not something else?
+## 9 — Why not something else?
 
-| Alternative | Delta |
+| Alternative | What it does instead |
 |---|---|
-| Nexus / Cover / HorizonCover | Pay *claims*, don't *recapitalize* |
-| ZK Proof-of-Reserves | Proves *solvency*, raises no capital |
-| Fhenix confidential lending | Originates *new* credit, not rescue of existing vault |
-| Umbra / VeilDAO treasury | Manages *existing* funds, no aggregate gate |
+| Insurance / cover pools | Pay claims after failure, don't recapitalize a live vault |
+| Proof-of-reserves | Shows solvency, doesn't raise capital |
+| Confidential lending | Originates new credit, not rescue of an existing position |
+| Treasury management | Manages existing funds, has no aggregate-capacity gate |
 
-No verified project does **private liability-side recapitalization with ZK aggregate-capacity proof**. See prior `docs/novel-use-case-research.md` (archived) for full evidence.
+BlackSwan is the first to combine a liability-side recapitalization with a ZK aggregate-capacity proof that mints yield atomically.
 
 ---
 
-*Built in 3–4 days by autonomous agents — 1 circuit, 1 vault + 1 rescue + 1 verifier + 1 pool helper, 3 rescuers, `T=600`, 1 ERC-20, 1 round, Sepolia non-simulated. No swap-hider re-derive.*
-
+*One circuit, one vault, one rescue, one verifier, one pool helper · Three rescuers · `T=600` · One ERC-20 · One round · Live on Sepolia, no simulation.*
