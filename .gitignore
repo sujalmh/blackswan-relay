@@ -69,15 +69,7 @@ docs/demo-90s.webm
 # ── Markdown: keep only root README for clean submission ──
 # (all other .md are internal docs, not for judges)
 AGENTS.md
-docs/BUILD_LOG.md
-docs/DEMO.md
-docs/FINAL_REPORT.md
-docs/HACKATHON_DEMO.md
-docs/JUDGE_REVIEW.md
-docs/PITCH.md
-docs/TODO.md
-docs/blackSwan-baseline.md
-docs/novel-use-case-research.md
+docs/*.md
 contracts/README.md
 circuits/README.md
 scripts/README.md
